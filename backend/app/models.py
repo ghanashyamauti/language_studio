@@ -82,6 +82,7 @@ class HOD(Base):
     
     dept_obj = relationship("Department", back_populates="hods")
     hod_classes = relationship("HodClass", back_populates="hod", cascade="all, delete")
+    dept_mappings = relationship("Department", secondary="hod_departments", backref="hod_objs")
 
 
 class HodClass(Base):
@@ -180,6 +181,12 @@ class ClassSubject(Base):
 class SubjectDepartment(Base):
     __tablename__ = "subject_departments"
     subject_id = Column(Integer, ForeignKey("subjects.subject_id", ondelete="CASCADE"), primary_key=True)
+    dept_id = Column(Integer, ForeignKey("departments.dept_id", ondelete="CASCADE"), primary_key=True)
+
+
+class HodDepartment(Base):
+    __tablename__ = "hod_departments"
+    hod_id = Column(Integer, ForeignKey("hods.hod_id", ondelete="CASCADE"), primary_key=True)
     dept_id = Column(Integer, ForeignKey("departments.dept_id", ondelete="CASCADE"), primary_key=True)
 
 

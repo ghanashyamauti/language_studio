@@ -38,7 +38,9 @@ def get_profile(
         "email": hod.email,
         "phone": hod.phone,
         "department": hod.dept_obj.name if hod.dept_obj else hod.department,
-        "dept_id": hod.dept_id
+        "dept_id": hod.dept_id,
+        "dept_ids": [d.dept_id for d in hod.dept_mappings],
+        "dept_names": [d.name for d in hod.dept_mappings]
     }
 
 
@@ -95,7 +97,10 @@ def _get_hod_classes(hod_id: int, db: Session):
     query = db.query(HodClass.class_name)
     # Filter by dept_id OR department string OR explicit hod_id
     filters = [HodClass.hod_id == hod_id]
-    if hod.dept_id:
+    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
+    if dept_ids:
+        filters.append(HodClass.dept_id.in_(dept_ids))
+    elif hod.dept_id:
         filters.append(HodClass.dept_id == hod.dept_id)
     if hod.department:
         filters.append(HodClass.department == hod.department)
@@ -140,7 +145,10 @@ def hod_dashboard(
     teacher_ids = set([r[0] for r in teacher_ids_from_assigns])
     
     t_filters = [Teacher.teacher_id.in_(teacher_ids)]
-    if hod.dept_id:
+    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
+    if dept_ids:
+        t_filters.append(Teacher.dept_id.in_(dept_ids))
+    elif hod.dept_id:
         t_filters.append(Teacher.dept_id == hod.dept_id)
     if hod.department:
         # Check if we should also match by department name if dept_id is missing
@@ -180,7 +188,9 @@ def hod_dashboard(
             "hod_id": hod.hod_id, "name": hod.name, "phone": hod.phone,
             "email": hod.email, 
             "department": hod.dept_obj.name if hod.dept_obj else hod.department,
-            "dept_id": hod.dept_id
+            "dept_id": hod.dept_id,
+            "dept_ids": dept_ids,
+            "dept_names": [d.name for d in hod.dept_mappings]
         },
         "classes": classes_data,
         "all_teachers": all_teachers,
@@ -477,7 +487,16 @@ def update_hod_teacher(
     if not teacher:
         raise HTTPException(404, "Teacher not found")
         
-    if teacher.dept_id != hod.dept_id and teacher.created_by_id != hod_id:
+    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
+    is_authorized = False
+    if teacher.created_by_id == hod_id:
+        is_authorized = True
+    elif dept_ids and teacher.dept_id in dept_ids:
+        is_authorized = True
+    elif teacher.dept_id == hod.dept_id:
+        is_authorized = True
+        
+    if not is_authorized:
         raise HTTPException(403, "Not authorized")
 
     if payload.phone != teacher.phone:
@@ -673,7 +692,11 @@ def list_hod_subjects(
     # Filter subjects by dept_id OR department string OR entries in SubjectDepartment
     q = db.query(Subject).outerjoin(SubjectDepartment)
     s_filters = []
-    if hod.dept_id:
+    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
+    if dept_ids:
+        s_filters.append(Subject.dept_id.in_(dept_ids))
+        s_filters.append(SubjectDepartment.dept_id.in_(dept_ids))
+    elif hod.dept_id:
         s_filters.append(Subject.dept_id == hod.dept_id)
         s_filters.append(SubjectDepartment.dept_id == hod.dept_id)
     if hod.department:

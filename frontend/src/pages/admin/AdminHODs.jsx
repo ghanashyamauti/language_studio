@@ -6,8 +6,8 @@ import toast from 'react-hot-toast';
 function HODForm({ initial, departments, onSave, onCancel }) {
   const [form, setForm] = useState(
     initial
-      ? { ...initial, class_names: initial.classes || [], password: '' }
-      : { name:'', phone:'', email:'', department:'', dept_id: '', password:'', class_names:[] }
+      ? { ...initial, class_names: initial.classes || [], dept_ids: initial.dept_ids || [], password: '' }
+      : { name:'', phone:'', email:'', department:'', dept_id: '', dept_ids: [], password:'', class_names:[] }
   );
   const [classInput, setClassInput] = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -22,6 +22,18 @@ function HODForm({ initial, departments, onSave, onCancel }) {
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addClass(); }
+  };
+
+  const handleCheckboxChange = (d_id, checked) => {
+    const nextIds = checked
+      ? [...(form.dept_ids || []), d_id]
+      : (form.dept_ids || []).filter(id => id !== d_id);
+    
+    setForm(f => ({
+      ...f,
+      dept_ids: nextIds,
+      dept_id: nextIds[0] || ''
+    }));
   };
 
   return (
@@ -48,11 +60,24 @@ function HODForm({ initial, departments, onSave, onCancel }) {
           ))}
 
           <div>
-            <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Department Assignment</label>
-            <select className="input" value={form.dept_id || ''} onChange={e => set('dept_id', e.target.value)}>
-              <option value="">— Select Department —</option>
-              {departments.map(d => <option key={d.dept_id} value={d.dept_id}>{d.name}</option>)}
-            </select>
+            <label className="block text-xs font-bold text-gray-500 mb-2.5 uppercase tracking-wider">Department Assignment(s)</label>
+            <div className="grid grid-cols-2 gap-3 max-h-36 overflow-y-auto p-4 border border-gray-100 rounded-2xl bg-gray-50/50">
+              {departments.map(d => {
+                const checked = form.dept_ids?.includes(d.dept_id);
+                return (
+                  <label key={d.dept_id} className="flex items-center gap-2.5 text-sm text-gray-700 cursor-pointer select-none font-medium hover:text-jspm-blue transition-colors">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-gray-300 text-jspm-blue focus:ring-jspm-blue cursor-pointer"
+                      checked={checked} 
+                      onChange={e => handleCheckboxChange(d.dept_id, e.target.checked)}
+                    />
+                    {d.name}
+                  </label>
+                );
+              })}
+            </div>
+            {!departments.length && <p className="text-xs text-gray-400 italic">No departments created yet.</p>}
           </div>
 
           <div>
@@ -240,7 +265,11 @@ export default function AdminHODs() {
               <div className="mt-6 flex items-center justify-between pt-4 border-t border-gray-50">
                 <div className="flex items-center gap-2 text-jspm-blue">
                   <Building2 size={14} />
-                  <span className="text-xs font-bold uppercase tracking-wide">{h.dept_name || h.department || 'General'}</span>
+                  <span className="text-xs font-bold uppercase tracking-wide">
+                    {h.dept_names && h.dept_names.length > 0 
+                      ? h.dept_names.join(', ') 
+                      : (h.dept_name || h.department || 'General')}
+                  </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5 justify-end">
                   {h.classes?.length > 0 ? h.classes.slice(0, 2).map(c => (

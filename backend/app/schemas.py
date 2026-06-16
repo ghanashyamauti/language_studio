@@ -87,7 +87,8 @@ class CreateHODRequest(BaseModel):
     email: Optional[str] = None
     department: Optional[str] = None
     dept_id: Optional[int] = None
-    password: str
+    dept_ids: List[int] = []
+    password: Optional[str] = None
     class_names: Optional[List[str]] = []
 
 class UpdateTeacherRequest(BaseModel):
@@ -111,6 +112,8 @@ class HODOut(BaseModel):
     department: Optional[str]
     dept_id: Optional[int]
     dept_name: Optional[str] = None
+    dept_ids: List[int] = []
+    dept_names: List[str] = []
     created_at: Optional[datetime]
     classes: List[str] = []
     model_config = {"from_attributes": True}

@@ -63,7 +63,11 @@ def admin_overview(db: Session = Depends(get_db), user: dict = Depends(require_r
     depts_data = []
     depts = db.query(Department).all()
     for d in depts:
-        hod_count = db.query(HOD).filter(HOD.dept_id == d.dept_id).count()
+        from app.models import HodDepartment
+        hod_count = db.query(HOD).filter(
+            (HOD.dept_id == d.dept_id) | 
+            HOD.hod_id.in_(db.query(HodDepartment.hod_id).filter(HodDepartment.dept_id == d.dept_id))
+        ).distinct().count()
         class_count = db.query(HodClass).filter(HodClass.dept_id == d.dept_id).count()
         subject_count = db.query(Subject).filter(Subject.dept_id == d.dept_id).count()
         student_count = db.query(Student).filter(Student.class_.in_(
@@ -85,7 +89,9 @@ def admin_overview(db: Session = Depends(get_db), user: dict = Depends(require_r
         hods_list.append({
             "hod_id": h.hod_id,
             "name": h.name,
-            "dept_name": h.dept_obj.name if h.dept_obj else h.department,
+            "dept_name": ", ".join([d.name for d in h.dept_mappings]) if h.dept_mappings else (h.dept_obj.name if h.dept_obj else h.department),
+            "dept_names": [d.name for d in h.dept_mappings],
+            "dept_ids": [d.dept_id for d in h.dept_mappings],
             "classes": [hc.class_name for hc in h.hod_classes]
         })
         
@@ -624,6 +630,8 @@ def list_hods(user: dict = Depends(require_role("admin")), db: Session = Depends
             hod_id=h.hod_id, name=h.name, phone=h.phone, email=h.email,
             department=h.department, dept_id=h.dept_id,
             dept_name=h.dept_obj.name if h.dept_obj else h.department,
+            dept_ids=[d.dept_id for d in h.dept_mappings],
+            dept_names=[d.name for d in h.dept_mappings],
             classes=[hc.class_name for hc in h.hod_classes],
             created_at=h.created_at
         ) for h in hods
@@ -645,20 +653,29 @@ def create_hod(
         raise HTTPException(400, "Email already in use")
 
     department = payload.department.strip() if payload.department and payload.department.strip() != "" else None
+    primary_dept_id = payload.dept_id or (payload.dept_ids[0] if payload.dept_ids else None)
 
     hod = HOD(
         name=payload.name, phone=payload.phone, email=email,
-        department=department, dept_id=payload.dept_id,
-        password_hash=hash_password(payload.password),
+        department=department, dept_id=primary_dept_id,
+        password_hash=hash_password(payload.password or "Manager@123"),
         created_by_admin_id=int(user["sub"]),
     )
     db.add(hod)
     db.flush()
 
+    from app.models import HodDepartment
+    for d_id in payload.dept_ids:
+        exists = db.query(HodDepartment).filter(HodDepartment.hod_id == hod.hod_id, HodDepartment.dept_id == d_id).first()
+        if not exists:
+            db.add(HodDepartment(hod_id=hod.hod_id, dept_id=d_id))
+    if not payload.dept_ids and primary_dept_id:
+        db.add(HodDepartment(hod_id=hod.hod_id, dept_id=primary_dept_id))
+
     for cls in (payload.class_names or []):
         exists = db.query(HodClass).filter(HodClass.hod_id == hod.hod_id, HodClass.class_name == cls).first()
         if not exists:
-            db.add(HodClass(hod_id=hod.hod_id, class_name=cls, dept_id=payload.dept_id))
+            db.add(HodClass(hod_id=hod.hod_id, class_name=cls, dept_id=primary_dept_id))
 
     activity.log(db, "admin", int(user["sub"]), user["name"],
                  "CREATE_HOD", target=payload.name,
@@ -687,17 +704,26 @@ def update_hod(
         raise HTTPException(400, "Email already in use")
         
     department = payload.department.strip() if payload.department and payload.department.strip() != "" else None
+    primary_dept_id = payload.dept_id or (payload.dept_ids[0] if payload.dept_ids else None)
 
     hod.name = payload.name
     hod.phone = payload.phone
     hod.email = email
     hod.department = department
-    hod.dept_id = payload.dept_id
+    hod.dept_id = primary_dept_id
     if payload.password:
         hod.password_hash = hash_password(payload.password)
+        
+    from app.models import HodDepartment
+    db.query(HodDepartment).filter(HodDepartment.hod_id == hod_id).delete()
+    for d_id in payload.dept_ids:
+        db.add(HodDepartment(hod_id=hod_id, dept_id=d_id))
+    if not payload.dept_ids and primary_dept_id:
+        db.add(HodDepartment(hod_id=hod_id, dept_id=primary_dept_id))
+
     db.query(HodClass).filter(HodClass.hod_id == hod_id).delete()
     for cls in (payload.class_names or []):
-        db.add(HodClass(hod_id=hod_id, class_name=cls, dept_id=payload.dept_id))
+        db.add(HodClass(hod_id=hod_id, class_name=cls, dept_id=primary_dept_id))
     activity.log(db, "admin", int(user["sub"]), user["name"],
                  "UPDATE_HOD", target=hod.name, ip=request.client.host)
     db.commit()
