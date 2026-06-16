@@ -44,10 +44,10 @@ def _header_table(title: str, subtitle: str = "", settings: dict = None):
         except: pass
 
     # Multi-line description to match the image precisely
-    desc_text = "The Language Studio — Attendance Management System"
+    desc_text = "Language Craft Studio — Attendance Management System"
     
     # Using a nested table for the right side to center the desc under the name
-    inner_right = Table([[Paragraph("THE LANGUAGE STUDIO", name_style)], 
+    inner_right = Table([[Paragraph("LANGUAGE CRAFT STUDIO", name_style)], 
                          [Paragraph(desc_text, desc_style)]], colWidths=[15*cm])
     inner_right.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),

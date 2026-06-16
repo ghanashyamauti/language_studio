@@ -9,12 +9,12 @@ db = SessionLocal()
 
 s = db.query(CollegeSettings).first()
 if not s:
-    s = CollegeSettings(college_name="The Language Studio", logo_url="/lcs-logo.png", attendance_threshold=75)
+    s = CollegeSettings(college_name="Language Craft Studio", logo_url="/lcs-logo.png", attendance_threshold=75)
     db.add(s)
-    print("Database updated: Created default settings row (The Language Studio, /lcs-logo.png)")
+    print("Database updated: Created default settings row (Language Craft Studio, /lcs-logo.png)")
 else:
-    s.college_name = "The Language Studio"
+    s.college_name = "Language Craft Studio"
     s.logo_url = "/lcs-logo.png"
-    print("Database updated: Updated existing settings row to The Language Studio, /lcs-logo.png")
+    print("Database updated: Updated existing settings row to Language Craft Studio, /lcs-logo.png")
 db.commit()
 db.close()

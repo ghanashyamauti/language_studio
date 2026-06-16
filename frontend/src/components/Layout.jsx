@@ -89,7 +89,7 @@ export default function Layout() {
           <div className="flex items-center gap-3">
             <img src="/lcs-logo.png" alt="LCS" className="w-10 h-10 rounded-lg object-contain bg-white/10 p-1" />
             <div>
-              <div className="text-white font-bold text-sm leading-tight">The Language Studio</div>
+              <div className="text-white font-bold text-sm leading-tight">Language Craft Studio</div>
               <div className="text-white/50 text-xs capitalize">{role === 'hod' ? 'Manager' : role} Portal</div>
             </div>
           </div>
@@ -152,7 +152,7 @@ export default function Layout() {
               <Menu size={20} />
             </button>
             <div className="hidden sm:flex items-center gap-2 text-sm text-gray-500 font-medium">
-              <span>The Language Studio Attendance</span>
+              <span>Language Craft Studio Attendance</span>
             </div>
           </div>
         </header>

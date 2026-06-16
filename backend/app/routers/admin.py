@@ -31,7 +31,7 @@ def _get_settings(db: Session) -> CollegeSettings:
     """Get or create the single college settings row."""
     s = db.query(CollegeSettings).first()
     if not s:
-        s = CollegeSettings(college_name="The Language Studio", logo_url="/lcs-logo.png", attendance_threshold=75)
+        s = CollegeSettings(college_name="Language Craft Studio", logo_url="/lcs-logo.png", attendance_threshold=75)
         db.add(s)
         db.commit()
         db.refresh(s)

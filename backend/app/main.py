@@ -4,7 +4,7 @@ from app.database import engine, Base
 from app.models import *  # ensure all models are registered
 from app.routers import admin, hod, teacher, student, auth
 
-app = FastAPI(title="The Language Studio Attendance API", version="2.0")
+app = FastAPI(title="Language Craft Studio Attendance API", version="2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,4 +24,4 @@ app.include_router(student.router)
 
 @app.get("/")
 def root():
-    return {"message": "The Language Studio Attendance API v2.1 — Refined Filters Active"}
+    return {"message": "Language Craft Studio Attendance API v2.1 — Refined Filters Active"}

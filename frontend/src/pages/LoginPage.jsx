@@ -71,7 +71,7 @@ export default function LoginPage() {
             )}
           </div>
           <h1 className="text-xl md:text-2xl font-bold text-white text-center tracking-wide drop-shadow-lg">
-            The Language Studio<br />
+            Language Craft Studio<br />
             {"Attendance Management System"}
           </h1>
         </div>
@@ -139,7 +139,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="mt-5 text-white/40 text-[10px]">© {new Date().getFullYear()} The Language Studio.</p>
+        <p className="mt-5 text-white/40 text-[10px]">© {new Date().getFullYear()} Language Craft Studio.</p>
       </div>
     </div>
   );
