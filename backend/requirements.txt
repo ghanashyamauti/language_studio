@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2
+python-dotenv
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+reportlab
+pandas
+openpyxl
+jinja2
+watchfiles
