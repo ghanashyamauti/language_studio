@@ -146,6 +146,8 @@ export default function AdminHODs() {
   const handleSave = async (form) => {
     const payload = { ...form };
     if (!payload.dept_id) payload.dept_id = null;
+    if (payload.email === '') payload.email = null;
+    if (payload.department === '') payload.department = null;
     if (editing && !payload.password) delete payload.password;
     try {
       if (editing) {

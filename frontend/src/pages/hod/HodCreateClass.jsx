@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { Plus } from 'lucide-react';
@@ -6,12 +6,45 @@ import toast from 'react-hot-toast';
 
 export default function HodCreateClass() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ class_name: '', division: '', department: '', semester: 2 });
+  const [form, setForm] = useState({ class_name: '', division: '', department: '', dept_ids: [], semester: 2 });
   const [loading, setLoading] = useState(false);
+  const [hodDepts, setHodDepts] = useState([]);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  // FIX: only auto-fill class_name if it's currently empty (don't overwrite manual edits)
+  useEffect(() => {
+    api.get('/hod/profile').then(res => {
+      const depts = [];
+      if (res.data.dept_ids) {
+        res.data.dept_ids.forEach((id, i) => {
+          depts.push({ dept_id: id, name: res.data.dept_names[i] });
+        });
+      }
+      setHodDepts(depts);
+    }).catch(() => toast.error('Failed to load profile departments'));
+  }, []);
+
+  const toggleDept = (deptId) => {
+    const exists = form.dept_ids.includes(deptId);
+    const newDeptIds = exists 
+      ? form.dept_ids.filter(id => id !== deptId)
+      : [...form.dept_ids, deptId];
+    const firstDept = hodDepts.find(d => newDeptIds.includes(d.dept_id));
+    
+    // Set form fields and call autoName logic inline
+    setForm(p => {
+      const updatedDepartment = firstDept?.name || '';
+      const parts = [updatedDepartment, p.division?.trim()].filter(Boolean);
+      const updatedClassName = parts.length && !p.class_name.trim() ? parts.join('-') : p.class_name;
+      return {
+        ...p,
+        dept_ids: newDeptIds,
+        department: updatedDepartment,
+        class_name: updatedClassName
+      };
+    });
+  };
+
   const autoName = () => {
     const parts = [form.department?.trim(), form.division?.trim()].filter(Boolean);
     if (parts.length && !form.class_name.trim()) {
@@ -21,6 +54,7 @@ export default function HodCreateClass() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (form.dept_ids.length === 0) { toast.error('At least one department is required'); return; }
     if (!form.class_name.trim()) { toast.error('Class name is required'); return; }
     setLoading(true);
     try {
@@ -41,10 +75,15 @@ export default function HodCreateClass() {
       <div className="card">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-gray-600 mb-1 block">Department</label>
-            <input type="text" className="input" placeholder="e.g. Computer Engineering" value={form.department}
-              onChange={e => set('department', e.target.value)}
-              onBlur={autoName} />
+            <label className="text-xs font-semibold text-gray-600 mb-2 block">Relevant Departments <span className="text-gray-400 font-normal lowercase">(at least one)</span></label>
+            <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto p-2 border border-gray-100 rounded-xl bg-gray-50/50 mb-3">
+              {hodDepts.map(d => (
+                <label key={d.dept_id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-white cursor-pointer transition-colors border border-transparent hover:border-gray-100">
+                  <input type="checkbox" checked={form.dept_ids.includes(d.dept_id)} onChange={() => toggleDept(d.dept_id)} className="rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-xs font-semibold text-gray-700 truncate">{d.name}</span>
+                </label>
+              ))}
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-gray-600 mb-1 block">Division</label>

@@ -22,9 +22,9 @@ export default function AdminSubjects() {
         api.get('/admin/departments'),
         api.get('/admin/classes')
       ]);
-      setSubjects(s.data);
-      setDepartments(d.data);
-      setClassList(c.data);
+      setSubjects(s.data || []);
+      setDepartments(d.data || []);
+      setClassList(c.data || []);
     } catch (e) { toast.error('Failed to load data'); }
   };
 
@@ -49,12 +49,17 @@ export default function AdminSubjects() {
     if (!form.name) { toast.error('Subject name required'); return; }
     setLoading(true);
 
+    const payload = { ...form };
+    if (!payload.dept_id) payload.dept_id = null;
+    if (payload.code === '') payload.code = null;
+    if (payload.department === '') payload.department = null;
+
     try {
       if (editId) {
-        await api.patch(`/admin/subjects/${editId}`, form);
+        await api.patch(`/admin/subjects/${editId}`, payload);
         toast.success('Subject updated');
       } else {
-        await api.post('/admin/subjects', form);
+        await api.post('/admin/subjects', payload);
         toast.success('Subject created');
       }
       setModal(null);

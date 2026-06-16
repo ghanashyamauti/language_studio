@@ -12,7 +12,7 @@ from app.database import get_db
 from app import activity
 from app.auth import require_role, hash_password, verify_password
 from app.models import (HOD, HodClass, Teacher, TeacherAssignment, Student,
-                        Attendance, Notification, Holiday, Department, Subject, SubjectDepartment, ClassSubject)
+                        Attendance, Notification, Holiday, Department, Subject, SubjectDepartment, ClassSubject, ClassDepartment)
 from app.schemas import (CreateClassRequest, AssignTeacherRequest, HodReportRow,
                          RemoveStudentRequest, ChangePasswordRequest,
                          ClassImportRequest, NotificationCreate,
@@ -93,20 +93,16 @@ def _get_hod_classes(hod_id: int, db: Session):
     hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
     if not hod:
         return []
-    
-    query = db.query(HodClass.class_name)
-    # Filter by dept_id OR department string OR explicit hod_id
-    filters = [HodClass.hod_id == hod_id]
-    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
-    if dept_ids:
-        filters.append(HodClass.dept_id.in_(dept_ids))
-    elif hod.dept_id:
-        filters.append(HodClass.dept_id == hod.dept_id)
-    if hod.department:
-        filters.append(HodClass.department == hod.department)
+    dept_ids = [d.dept_id for d in hod.dept_mappings]
+    if hod.dept_id and hod.dept_id not in dept_ids:
+        dept_ids.append(hod.dept_id)
         
-    query = query.filter(or_(*filters))
-    return [r[0] for r in query.distinct().all()]
+    class_names = db.query(HodClass.class_name).filter(
+        (HodClass.dept_id.in_(dept_ids)) |
+        (HodClass.class_name.in_(db.query(ClassDepartment.class_name).filter(ClassDepartment.dept_id.in_(dept_ids)))) |
+        (HodClass.hod_id == hod_id)
+    ).distinct().all()
+    return [r[0] for r in class_names]
 
 
 @router.get("/dashboard")
@@ -119,6 +115,10 @@ def hod_dashboard(
     if not hod:
         raise HTTPException(404, "HOD not found")
 
+    dept_ids = [d.dept_id for d in hod.dept_mappings]
+    if hod.dept_id and hod.dept_id not in dept_ids:
+        dept_ids.append(hod.dept_id)
+
     class_names = _get_hod_classes(hod_id, db)
     classes_data = []
     for cls in class_names:
@@ -129,32 +129,22 @@ def hod_dashboard(
         
         count = db.query(Student).filter(Student.class_ == cls).count()
         
+        c_dept_ids = [d.dept_id for d in hc.dept_mappings] if hc else []
+        c_dept_names = [d.name for d in hc.dept_mappings] if hc else []
+        
         classes_data.append({
             "class_name": cls,
             "division": hc.division if hc else None,
-            "department": hc.department if hc else (hc.dept_obj.name if hc and hc.dept_obj else None),
+            "department": ", ".join(c_dept_names) if c_dept_names else (hc.department if hc else (hc.dept_obj.name if hc and hc.dept_obj else None)),
+            "dept_ids": c_dept_ids,
+            "dept_names": c_dept_names,
             "semester": hc.semester if hc else 2,
             "student_count": count,
             "assignments": [{"subject": a.subject, "teacher_id": a.teacher_id} for a in assignments],
             "subjects": sorted(list(set([a.subject for a in assignments] + mapped_subjects)))
         })
 
-    teacher_ids_from_assigns = db.query(TeacherAssignment.teacher_id).filter(
-        TeacherAssignment.class_.in_(class_names)
-    ).all()
-    teacher_ids = set([r[0] for r in teacher_ids_from_assigns])
-    
-    t_filters = [Teacher.teacher_id.in_(teacher_ids)]
-    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
-    if dept_ids:
-        t_filters.append(Teacher.dept_id.in_(dept_ids))
-    elif hod.dept_id:
-        t_filters.append(Teacher.dept_id == hod.dept_id)
-    if hod.department:
-        # Check if we should also match by department name if dept_id is missing
-        t_filters.append(Teacher.dept_obj.has(name=hod.department))
-        
-    teachers = db.query(Teacher).filter(or_(*t_filters)).order_by(Teacher.name).all()
+    teachers = db.query(Teacher).order_by(Teacher.name).all()
     all_teachers = [
         {
             "teacher_id": t.teacher_id, 
@@ -171,17 +161,33 @@ def hod_dashboard(
     end = today.strftime("%Y-%m-%d")
 
     alerts = []
-    for cls in class_names:
-        students = db.query(Student).filter(Student.class_ == cls).all()
-        for s in students:
-            rows = db.query(Attendance).filter(
-                Attendance.student_id == s.student_id,
-                Attendance.date.between(start, end),
+    if class_names:
+        students = db.query(Student).filter(Student.class_.in_(class_names)).all()
+        if students:
+            student_map = {s.student_id: s for s in students}
+            student_ids = list(student_map.keys())
+            
+            attendance_rows = db.query(Attendance.student_id, Attendance.status).filter(
+                Attendance.student_id.in_(student_ids),
+                Attendance.date.between(start, end)
             ).all()
-            if rows:
-                pct = sum(1 for r in rows if r.status == "Present") / len(rows) * 100
-                if pct < 75:
-                    alerts.append({"class_": cls, "roll_no": s.roll_no, "name": s.name, "percent": round(pct, 1)})
+            
+            attendance_by_student = {}
+            for s_id, status in attendance_rows:
+                attendance_by_student.setdefault(s_id, []).append(status)
+                
+            for s_id, statuses in attendance_by_student.items():
+                if statuses:
+                    present_count = sum(1 for status in statuses if status == "Present")
+                    pct = (present_count / len(statuses)) * 100
+                    if pct < 75:
+                        s = student_map[s_id]
+                        alerts.append({
+                            "class_": s.class_,
+                            "roll_no": s.roll_no,
+                            "name": s.name,
+                            "percent": round(pct, 1)
+                        })
 
     return {
         "hod": {
@@ -213,10 +219,15 @@ def get_classes(
         mappings = db.query(Subject.name).join(ClassSubject).filter(ClassSubject.class_name == cls).all()
         mapped_subjects = [m[0] for m in mappings]
         
+        c_dept_ids = [d.dept_id for d in hc.dept_mappings] if hc else []
+        c_dept_names = [d.name for d in hc.dept_mappings] if hc else []
+        
         result.append({
             "class_name": cls,
             "division": hc.division if hc else None,
-            "department": hc.department if hc else (hc.dept_obj.name if hc and hc.dept_obj else None),
+            "department": ", ".join(c_dept_names) if c_dept_names else (hc.department if hc else (hc.dept_obj.name if hc and hc.dept_obj else None)),
+            "dept_ids": c_dept_ids,
+            "dept_names": c_dept_names,
             "semester": hc.semester if hc else 2,
             "students": [{"student_id": s.student_id, "roll_no": s.roll_no, "name": s.name,
                            "prn": s.prn, "semester": s.semester} for s in students],
@@ -238,10 +249,21 @@ def create_class(
     existing = db.query(HodClass).filter(HodClass.hod_id == hod_id, HodClass.class_name == payload.class_name).first()
     if existing:
         raise HTTPException(400, "Class already exists for this HOD")
+    
+    primary_dept_id = payload.dept_id or (payload.dept_ids[0] if payload.dept_ids else None)
+    
     hc = HodClass(hod_id=hod_id, class_name=payload.class_name,
                   division=payload.division, department=payload.department,
+                  dept_id=primary_dept_id,
                   semester=payload.semester)
     db.add(hc)
+    db.flush()
+    
+    for d_id in payload.dept_ids:
+        db.add(ClassDepartment(class_name=payload.class_name, dept_id=d_id))
+    if not payload.dept_ids and primary_dept_id:
+        db.add(ClassDepartment(class_name=payload.class_name, dept_id=primary_dept_id))
+
     activity.log(db, "hod", hod_id, user["name"], "CREATE_CLASS",
                  target=payload.class_name, ip=request.client.host)
     db.commit()
@@ -487,17 +509,7 @@ def update_hod_teacher(
     if not teacher:
         raise HTTPException(404, "Teacher not found")
         
-    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
-    is_authorized = False
-    if teacher.created_by_id == hod_id:
-        is_authorized = True
-    elif dept_ids and teacher.dept_id in dept_ids:
-        is_authorized = True
-    elif teacher.dept_id == hod.dept_id:
-        is_authorized = True
-        
-    if not is_authorized:
-        raise HTTPException(403, "Not authorized")
+    is_authorized = True
 
     if payload.phone != teacher.phone:
         if db.query(Teacher).filter(Teacher.phone == payload.phone).first():
@@ -521,9 +533,9 @@ def delete_hod_teacher(
     if not teacher:
         raise HTTPException(404, "Teacher not found")
         
-    # HOD can only delete if they created the teacher
-    if teacher.created_by_role != "hod" or teacher.created_by_id != hod_id:
-        raise HTTPException(403, "Not authorized to delete this teacher. Only the creator can do this.")
+    # HOD can delete any teacher
+    # if teacher.created_by_role != "hod" or teacher.created_by_id != hod_id:
+    #     raise HTTPException(403, "Not authorized to delete this teacher. Only the creator can do this.")
         
     name = teacher.name
     db.delete(teacher)
@@ -670,9 +682,9 @@ def delete_hod_subject(
     if not s:
         raise HTTPException(404, "Subject not found")
         
-    # HOD can only delete if they created it
-    if s.created_by_role != "hod" or s.created_by_id != hod_id:
-        raise HTTPException(403, "Not authorized to delete this subject. Only the creator can do this.")
+    # HOD can delete any subject
+    # if s.created_by_role != "hod" or s.created_by_id != hod_id:
+    #     raise HTTPException(403, "Not authorized to delete this subject. Only the creator can do this.")
         
     name = s.name
     db.delete(s)
@@ -686,26 +698,7 @@ def list_hod_subjects(
     user: dict = Depends(require_role("hod")),
     db: Session = Depends(get_db),
 ):
-    hod_id = int(user["sub"])
-    hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
-    
-    # Filter subjects by dept_id OR department string OR entries in SubjectDepartment
-    q = db.query(Subject).outerjoin(SubjectDepartment)
-    s_filters = []
-    dept_ids = [d.dept_id for d in hod.dept_mappings] if hod else []
-    if dept_ids:
-        s_filters.append(Subject.dept_id.in_(dept_ids))
-        s_filters.append(SubjectDepartment.dept_id.in_(dept_ids))
-    elif hod.dept_id:
-        s_filters.append(Subject.dept_id == hod.dept_id)
-        s_filters.append(SubjectDepartment.dept_id == hod.dept_id)
-    if hod.department:
-        s_filters.append(Subject.department == hod.department)
-        
-    if s_filters:
-        q = q.filter(or_(*s_filters))
-    
-    subjects = q.distinct().order_by(Subject.name).all()
+    subjects = db.query(Subject).distinct().order_by(Subject.name).all()
     result = []
     for s in subjects:
         result.append(SubjectOut(

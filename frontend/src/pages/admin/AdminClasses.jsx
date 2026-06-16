@@ -8,12 +8,13 @@ function ClassModal({ hods, subjects, departments, onSave, onCancel, editData = 
     class_name: editData.class_name, 
     hod_id: hods.find(h => h.name === editData.hod)?.hod_id || '',
     dept_id: editData.dept_id || '',
+    dept_ids: editData.dept_ids || [],
     semester: editData.semester || 2,
     department_name: editData.dept_name || '', 
     division: editData.division || '',
     subjects: editData.assigned_subjects || []
   } : { 
-    class_name:'', division:'', department_name:'', dept_id:'', semester:2, hod_id:'', subjects: [] 
+    class_name:'', division:'', department_name:'', dept_id:'', dept_ids: [], semester:2, hod_id:'', subjects: [] 
   });
   
   const set = (k,v) => setForm(f => ({ ...f, [k]:v }));
@@ -41,14 +42,22 @@ function ClassModal({ hods, subjects, departments, onSave, onCancel, editData = 
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Select Department</label>
-              <select className="input" value={form.dept_id} onChange={e => {
-                const d = departments.find(dep => dep.dept_id === Number(e.target.value));
-                setForm(f => ({ ...f, dept_id: e.target.value, department_name: d?.name || '' }));
-              }}>
-                <option value="">Select Department (recommended)</option>
-                {departments.map(d => <option key={d.dept_id} value={d.dept_id}>{d.name}</option>)}
-              </select>
+              <label className="block text-sm font-semibold text-gray-700 mb-2 font-bold">Select Departments <span className="text-gray-400 font-normal lowercase">(at least one)</span></label>
+              <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto p-2 border border-gray-100 rounded-xl bg-gray-50/50">
+                {departments.map(d => (
+                  <label key={d.dept_id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-white cursor-pointer transition-colors border border-transparent hover:border-gray-100">
+                    <input type="checkbox" checked={form.dept_ids.includes(d.dept_id)} onChange={() => {
+                      const exists = form.dept_ids.includes(d.dept_id);
+                      const newDeptIds = exists 
+                        ? form.dept_ids.filter(id => id !== d.dept_id)
+                        : [...form.dept_ids, d.dept_id];
+                      const firstDept = departments.find(dep => newDeptIds.includes(dep.dept_id));
+                      setForm(f => ({ ...f, dept_ids: newDeptIds, dept_id: firstDept?.dept_id || '', department_name: firstDept?.name || '' }));
+                    }} className="rounded text-jspm-blue" />
+                    <span className="text-xs font-medium text-gray-700 truncate">{d.name}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             {!editData && (
               <div className="grid grid-cols-2 gap-3">
@@ -133,6 +142,7 @@ export default function AdminClasses() {
         class_name: form.class_name.trim(),
         hod_id: form.hod_id ? Number(form.hod_id) : null,
         dept_id: form.dept_id ? Number(form.dept_id) : null,
+        dept_ids: form.dept_ids,
         semester: form.semester,
         subjects: form.subjects
       };
@@ -210,13 +220,15 @@ export default function AdminClasses() {
                 </div>
               </div>
               <h3 className="font-semibold text-gray-800">{c.class_name}</h3>
-              <div className="flex gap-4 mt-3 text-sm text-gray-500">
+              <div className="flex gap-4 mt-3 text-sm text-gray-500 flex-wrap">
                 <span className="flex items-center gap-1"><GraduationCap size={14}/>{c.student_count} students</span>
-                {c.dept_name && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md text-[10px] font-bold uppercase">
-                    {c.dept_name}
-                  </span>
-                )}
+                <div className="flex flex-wrap gap-1">
+                  {(c.dept_names?.length > 0 ? c.dept_names : [c.dept_name]).filter(Boolean).map(dn => (
+                    <span key={dn} className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md text-[10px] font-bold uppercase">
+                      {dn}
+                    </span>
+                  ))}
+                </div>
               </div>
               
               <div className="mt-4 pt-4 border-t border-gray-50">

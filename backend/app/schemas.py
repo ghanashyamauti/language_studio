@@ -164,6 +164,7 @@ class AdminCreateClassRequest(BaseModel):
     class_name: str
     hod_id: Optional[int] = None
     dept_id: Optional[int] = None
+    dept_ids: List[int] = []
     semester: int = 2
     subjects: List[int] = []
 
@@ -171,6 +172,7 @@ class AdminUpdateClassRequest(BaseModel):
     class_name: str
     hod_id: Optional[int] = None
     dept_id: Optional[int] = None
+    dept_ids: List[int] = []
     semester: Optional[int] = None
     subjects: List[int] = []
 
@@ -213,6 +215,8 @@ class CreateClassRequest(BaseModel):
     class_name: str
     division: Optional[str] = None
     department: Optional[str] = None
+    dept_id: Optional[int] = None
+    dept_ids: List[int] = []
     semester: int = 2
 
 class AssignTeacherRequest(BaseModel):

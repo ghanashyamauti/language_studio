@@ -51,12 +51,15 @@ export default function HodSubjects() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const payload = { ...form };
+    if (payload.code === '') payload.code = null;
+
     try {
       if (editId) {
-        await api.patch(`/hod/subjects/${editId}`, form);
+        await api.patch(`/hod/subjects/${editId}`, payload);
         toast.success('Subject updated successfully');
       } else {
-        await api.post('/hod/subjects', form);
+        await api.post('/hod/subjects', payload);
         toast.success('Subject created successfully');
       }
       setModal(false);

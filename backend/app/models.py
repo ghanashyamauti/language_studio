@@ -98,6 +98,13 @@ class HodClass(Base):
     
     hod = relationship("HOD", back_populates="hod_classes")
     dept_obj = relationship("Department", back_populates="classes")
+    dept_mappings = relationship(
+        "Department",
+        secondary="class_departments",
+        primaryjoin="HodClass.class_name == ClassDepartment.class_name",
+        secondaryjoin="Department.dept_id == ClassDepartment.dept_id",
+        backref="class_objs"
+    )
     __table_args__ = (UniqueConstraint("hod_id", "class_name", name="uq_hod_class"),)
 
 
@@ -187,6 +194,12 @@ class SubjectDepartment(Base):
 class HodDepartment(Base):
     __tablename__ = "hod_departments"
     hod_id = Column(Integer, ForeignKey("hods.hod_id", ondelete="CASCADE"), primary_key=True)
+    dept_id = Column(Integer, ForeignKey("departments.dept_id", ondelete="CASCADE"), primary_key=True)
+
+
+class ClassDepartment(Base):
+    __tablename__ = "class_departments"
+    class_name = Column(String, primary_key=True)
     dept_id = Column(Integer, ForeignKey("departments.dept_id", ondelete="CASCADE"), primary_key=True)
 
 

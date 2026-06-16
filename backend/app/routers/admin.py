@@ -11,7 +11,7 @@ from sqlalchemy import func
 
 from app.database import get_db
 from app.auth import require_role, hash_password
-from app.models import Student, Teacher, TeacherAssignment, Attendance, Admin, HOD, HodClass, ActivityLog, Holiday, Notification, CollegeSettings, Subject, Department, ClassSubject
+from app.models import Student, Teacher, TeacherAssignment, Attendance, Admin, HOD, HodClass, ActivityLog, Holiday, Notification, CollegeSettings, Subject, Department, ClassSubject, SubjectDepartment, ClassDepartment
 from app.schemas import (
     CreateHODRequest, CreateTeacherRequest, UpdateTeacherRequest, HODOut, TeacherOut,
     ActivityLogOut, BulkImportRequest, TeacherImportRequest,
@@ -597,20 +597,27 @@ def admin_analytics(
         })
     teacher_perf.sort(key=lambda x: x["sessions_last_30d"], reverse=True)
 
-    # Defaulters count
+    # Defaulters count optimized
     start_str = thirty_ago.strftime("%Y-%m-%d")
     end_str = today.strftime("%Y-%m-%d")
-    students = db.query(Student).all()
+    
+    # Bulk fetch attendance rows for all students in date range
+    att_rows = db.query(Attendance.student_id, Attendance.status).filter(
+        Attendance.date.between(start_str, end_str)
+    ).all()
+    
+    # Group in memory
+    att_by_student = {}
+    for student_id, status in att_rows:
+        att_by_student.setdefault(student_id, []).append(status)
+        
     defaulter_count = 0
-    for s in students:
-        rows = db.query(Attendance).filter(
-            Attendance.student_id == s.student_id,
-            Attendance.date.between(start_str, end_str),
-        ).all()
-        if rows:
-            pct = sum(1 for r in rows if r.status == "Present") / len(rows) * 100
-            if pct < 75:
-                defaulter_count += 1
+    for student_id, statuses in att_by_student.items():
+        total = len(statuses)
+        present = sum(1 for s in statuses if s == "Present")
+        pct = (present / total * 100) if total > 0 else 0
+        if pct < 75:
+            defaulter_count += 1
 
     return {
         "trend": trend,
@@ -793,11 +800,20 @@ def list_classes(user: dict = Depends(require_role("admin")), db: Session = Depe
         class_subjects = db.query(ClassSubject.subject_id).filter(ClassSubject.class_name == c.class_name).all()
         assigned_subject_ids = [s[0] for s in class_subjects]
         
+        dept_ids = [d.dept_id for d in c.dept_mappings]
+        dept_names = [d.name for d in c.dept_mappings]
+        if dept_id and dept_id not in dept_ids:
+            dept_ids.insert(0, dept_id)
+        if dept_name and dept_name not in dept_names:
+            dept_names.insert(0, dept_name)
+        
         result.append({
             "class_name": c.class_name,
             "department": c.department,
             "dept_id": dept_id,
             "dept_name": dept_name,
+            "dept_ids": dept_ids,
+            "dept_names": dept_names,
             "division": c.division,
             "semester": c.semester,
             "hod": hod_name,
@@ -816,7 +832,7 @@ def create_class(
     """Create a class (optionally assign to a HOD)."""
     class_name = payload.class_name.strip()
     hod_id = payload.hod_id
-    dept_id = payload.dept_id
+    dept_id = payload.dept_id or (payload.dept_ids[0] if payload.dept_ids else None)
 
     # If HOD is selected, prefer their department if not explicitly provided
     if hod_id and not dept_id:
@@ -839,6 +855,13 @@ def create_class(
             dept_id=dept_id,
             semester=payload.semester
         ))
+
+    # Assign multiple departments
+    db.query(ClassDepartment).filter(ClassDepartment.class_name == class_name).delete()
+    for d_id in payload.dept_ids:
+        db.add(ClassDepartment(class_name=class_name, dept_id=d_id))
+    if not payload.dept_ids and dept_id:
+        db.add(ClassDepartment(class_name=class_name, dept_id=dept_id))
 
     activity.log(db, "admin", int(user["sub"]), user["name"],
                  "CREATE_CLASS", target=class_name, ip=request.client.host)
@@ -889,6 +912,8 @@ def update_class(
         db.query(HodClass).filter(HodClass.class_name == class_name).update({"class_name": new_name})
         # Update ClassSubject table
         db.query(ClassSubject).filter(ClassSubject.class_name == class_name).update({"class_name": new_name})
+        # Update ClassDepartment table
+        db.query(ClassDepartment).filter(ClassDepartment.class_name == class_name).update({"class_name": new_name})
 
     # Update semester if provided
     if new_semester is not None:
@@ -896,21 +921,31 @@ def update_class(
         db.query(Student).filter(Student.class_ == (new_name or class_name)).update({"semester": new_semester})
 
     # Update HOD/Dept assignment
-    if hod_id is not None or payload.dept_id is not None:
+    primary_dept_id = payload.dept_id or (payload.dept_ids[0] if payload.dept_ids else None)
+    if hod_id is not None or payload.dept_id is not None or payload.dept_ids:
         # Update existing HodClass row
         hc = db.query(HodClass).filter(HodClass.class_name == (new_name or class_name)).first()
         if hc:
             if hod_id is not None: hc.hod_id = hod_id if hod_id != 0 else None
-            if payload.dept_id is not None: hc.dept_id = payload.dept_id
+            if primary_dept_id is not None: hc.dept_id = primary_dept_id
             if new_semester is not None: hc.semester = new_semester
-        elif hod_id or payload.dept_id:
+        else:
             # Create if it didn't exist
             db.add(HodClass(
                 hod_id=hod_id if hod_id != 0 else None,
-                dept_id=payload.dept_id,
+                dept_id=primary_dept_id,
                 class_name=(new_name or class_name),
                 semester=new_semester or 2
             ))
+
+    # Update ClassDepartment mappings
+    if payload.dept_ids:
+        db.query(ClassDepartment).filter(ClassDepartment.class_name == (new_name or class_name)).delete()
+        for d_id in payload.dept_ids:
+            db.add(ClassDepartment(class_name=(new_name or class_name), dept_id=d_id))
+    elif primary_dept_id:
+        db.query(ClassDepartment).filter(ClassDepartment.class_name == (new_name or class_name)).delete()
+        db.add(ClassDepartment(class_name=(new_name or class_name), dept_id=primary_dept_id))
 
     # Update assigned subjects
     db.query(ClassSubject).filter(ClassSubject.class_name == (new_name or class_name)).delete()

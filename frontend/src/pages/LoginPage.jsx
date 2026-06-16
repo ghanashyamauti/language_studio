@@ -6,10 +6,10 @@ import toast from 'react-hot-toast';
 import { Lock, User, ChevronDown } from 'lucide-react';
 
 const ROLES = [
-  { value: 'admin', label: 'Admin', color: 'bg-jspm-blue text-white' },
+  { value: 'admin', label: 'Admin', color: 'bg-indigo-600 text-white' },
   { value: 'hod', label: 'Manager', color: 'bg-purple-600 text-white' },
   { value: 'teacher', label: 'Teacher', color: 'bg-emerald-600 text-white' },
-  { value: 'student', label: 'Student', color: 'bg-jspm-red text-white' },
+  { value: 'student', label: 'Student', color: 'bg-rose-600 text-white' },
 ];
 
 export default function LoginPage() {
@@ -52,13 +52,13 @@ export default function LoginPage() {
   const activeRole = ROLES.find(r => r.value === role);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-900 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 relative overflow-hidden">
-      {/* Background watermark */}
-      <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none opacity-[0.04]">
-        <img src="/login-bg.png" alt="" className="w-[800px] h-[800px] object-contain" />
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden bg-slate-50">
+      {/* Background Cover Image */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
+        <img src="/login-bg.png" alt="" className="w-full h-full object-cover" />
       </div>
-      {/* Dark overlay */}
-      <div className="absolute inset-0 bg-black/30 z-0" />
+      {/* Subtle overlay */}
+      <div className="absolute inset-0 bg-slate-900/10 z-0 pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-xl flex flex-col items-center">
         {/* Header / Logo */}
@@ -70,14 +70,14 @@ export default function LoginPage() {
               <img src="/lcs-logo.png" alt="LCS Logo" className="h-14 object-contain" />
             )}
           </div>
-          <h1 className="text-xl md:text-2xl font-bold text-white text-center tracking-wide drop-shadow-lg">
+          <h1 className="text-xl md:text-2xl font-bold text-slate-900 text-center tracking-wide drop-shadow-md bg-white/80 backdrop-blur-sm px-4 py-1.5 rounded-2xl border border-slate-100">
             Language Craft Studio<br />
-            {"Attendance Management System"}
+            <span className="text-slate-700 text-base md:text-lg font-semibold">{"Attendance Management System"}</span>
           </h1>
         </div>
 
         {/* Login Form Container */}
-        <div className="w-full bg-black/40 hover:bg-black/70 backdrop-blur-md hover:backdrop-blur-xl transition-all duration-500 ease-in-out rounded-2xl p-4 md:p-6 shadow-2xl border border-white/10">
+        <div className="w-full bg-slate-950/85 hover:bg-slate-950/95 backdrop-blur-md transition-all duration-500 ease-in-out rounded-2xl p-4 md:p-6 shadow-2xl border border-white/10">
           <h2 className="text-lg md:text-xl font-bold text-white mb-4">Sign in here</h2>
 
           {/* Role selector */}
@@ -95,7 +95,7 @@ export default function LoginPage() {
               <div className="flex-1">
                 <input
                   type={role === 'admin' ? 'email' : 'text'}
-                  className="w-full bg-white text-gray-900 placeholder-gray-500 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-jspm-blue font-medium text-sm"
+                  className="w-full bg-white text-gray-900 placeholder-gray-500 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-sm"
                   placeholder={placeholders[role]}
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -106,7 +106,7 @@ export default function LoginPage() {
               <div className="flex-1">
                 <input
                   type="password"
-                  className="w-full bg-white text-gray-900 placeholder-gray-500 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-jspm-blue font-medium text-sm"
+                  className="w-full bg-white text-gray-900 placeholder-gray-500 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-sm"
                   placeholder="Password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -139,7 +139,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="mt-5 text-white/40 text-[10px]">© {new Date().getFullYear()} Language Craft Studio.</p>
+        <p className="mt-5 text-slate-700 bg-white/70 backdrop-blur-sm px-2.5 py-0.5 rounded-lg border border-slate-100/50 text-[10px] font-medium">© {new Date().getFullYear()} Language Craft Studio.</p>
       </div>
     </div>
   );
