@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -71,15 +71,22 @@ def student_dashboard(
         ).distinct().all()
         all_subjects = [r.subject for r in att_subj]
 
+    # Fetch all attendance records for this student in range in ONE query
+    records_for_percent = db.query(Attendance.subject, Attendance.status).filter(
+        Attendance.student_id == student_id,
+        Attendance.date.between(start, end)
+    ).all()
+    
+    # Group in memory
+    records_by_subject = {}
+    for subject, status in records_for_percent:
+        records_by_subject.setdefault(subject, []).append(status)
+        
     percents = []
     for sub in all_subjects:
-        sub_records = db.query(Attendance).filter(
-            Attendance.student_id == student_id,
-            Attendance.subject == sub,
-            Attendance.date.between(start, end),
-        ).all()
+        sub_records = records_by_subject.get(sub, [])
         total_sub = len(sub_records)
-        attended = sum(1 for r in sub_records if r.status == "Present")
+        attended = sum(1 for status in sub_records if status == "Present")
         # Only include subjects with actual data in the period
         if total_sub == 0:
             continue
@@ -249,3 +256,37 @@ def change_password(
     student.must_change_password = False  # Clear force-change flag
     db.commit()
     return {"message": "Password updated successfully"}
+
+
+@router.post("/upload-profile")
+def upload_profile(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role("student")),
+    db: Session = Depends(get_db)
+):
+    import os
+    import uuid
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(400, "Invalid image format")
+    
+    os.makedirs("uploads", exist_ok=True)
+    filename = f"student_{user['sub']}_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join("uploads", filename)
+    
+    try:
+        content = file.file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"Could not save file: {e}")
+        
+    student_id = int(user["sub"])
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(404, "Student not found")
+        
+    url_path = f"/uploads/{filename}"
+    student.profile_photo = url_path
+    db.commit()
+    return {"profile_photo": url_path}

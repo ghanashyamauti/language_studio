@@ -12,6 +12,16 @@ const ROLES = [
   { value: 'student', label: 'Student', color: 'bg-rose-600 text-white' },
 ];
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -44,8 +54,8 @@ export default function LoginPage() {
 
   const placeholders = {
     admin: 'Email address',
-    hod: 'Phone number',
-    teacher: 'Phone number',
+    hod: 'Mobile number or Email',
+    teacher: 'Mobile number or Email',
     student: 'Roll number',
   };
 
@@ -55,7 +65,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden bg-slate-50">
       {/* Background Cover Image */}
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <img src="/login-bg.png" alt="" className="w-full h-full object-cover" />
+        <img src="/login-bg.png?v=2" alt="" className="w-full h-full object-cover" />
       </div>
       {/* Subtle overlay */}
       <div className="absolute inset-0 bg-slate-900/10 z-0 pointer-events-none" />
@@ -65,12 +75,12 @@ export default function LoginPage() {
         <div className="flex flex-col items-center mb-5">
           <div className="bg-white p-1.5 rounded-xl shadow-xl mb-3">
             {settings?.logo_url ? (
-              <img src={settings.logo_url} alt="Logo" className="h-14 object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+              <img src={getImageUrl(settings.logo_url)} alt="Logo" className="h-14 object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
             ) : (
               <img src="/lcs-logo.png" alt="LCS Logo" className="h-14 object-contain" />
             )}
           </div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-900 text-center tracking-wide drop-shadow-md bg-white/80 backdrop-blur-sm px-4 py-1.5 rounded-2xl border border-slate-100">
+          <h1 className="text-xl md:text-2xl font-bold text-slate-900 text-center tracking-wide drop-shadow-md">
             Language Craft Studio<br />
             <span className="text-slate-700 text-base md:text-lg font-semibold">{"Attendance Management System"}</span>
           </h1>
@@ -139,7 +149,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="mt-5 text-slate-700 bg-white/70 backdrop-blur-sm px-2.5 py-0.5 rounded-lg border border-slate-100/50 text-[10px] font-medium">© {new Date().getFullYear()} Language Craft Studio.</p>
+        <p className="mt-5 text-slate-700 text-[10px] font-medium">© {new Date().getFullYear()} Language Craft Studio.</p>
       </div>
     </div>
   );

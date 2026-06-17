@@ -21,7 +21,7 @@ export default function HodClassDetail() {
   const [resetPassword, setResetPassword] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [createStudentModal, setCreateStudentModal] = useState(false);
-  const [studentForm, setStudentForm] = useState({ roll_no: '', prn: '', name: '', password: '' });
+  const [studentForm, setStudentForm] = useState({ roll_no: '', prn: '', name: '', password: '', subjects: [] });
 
   const load = async () => {
     const [classesRes, dashRes, subjectsRes] = await Promise.all([
@@ -117,6 +117,10 @@ export default function HodClassDetail() {
 
   const handleCreateStudent = async (e) => {
     e.preventDefault();
+    if (!studentForm.subjects || studentForm.subjects.length === 0) {
+      toast.error('Please select at least one subject');
+      return;
+    }
     try {
       await api.post('/hod/students', {
         ...studentForm,
@@ -125,7 +129,7 @@ export default function HodClassDetail() {
       });
       toast.success('Student created');
       setCreateStudentModal(false);
-      setStudentForm({ roll_no: '', prn: '', name: '', password: '' });
+      setStudentForm({ roll_no: '', prn: '', name: '', password: '', subjects: [] });
       load();
     } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
   };
@@ -376,8 +380,8 @@ export default function HodClassDetail() {
               </div>
             ) : (
               <>
-                <p className="text-xs text-gray-500 mb-3">One student per line: <code className="bg-gray-100 px-1 rounded">RollNo PRN FullName</code> or comma separated</p>
-                <textarea className="input font-mono text-xs mb-4" rows="10" placeholder="T23CO001 23CO001 John Doe&#10;T23CO002 23CO002 Jane Smith"
+                <p className="text-xs text-gray-500 mb-3">One student per line in CSV format: <code className="bg-gray-100 px-1 rounded">roll_no,prn,name,"subjects"</code> (e.g. roll, prn, name, and comma-separated subjects inside double quotes). Subjects are mandatory.</p>
+                <textarea className="input font-mono text-xs mb-4" rows="10" placeholder="T23CO001,23CO001,John Doe,&quot;Maths, Science&quot;&#10;T23CO002,23CO002,Jane Smith,&quot;Maths&quot;"
                   value={importText} onChange={e => setImportText(e.target.value)} />
               </>
             )}
@@ -433,6 +437,34 @@ export default function HodClassDetail() {
               <div>
                 <label className="label">Full Name</label>
                 <input type="text" className="input" required value={studentForm.name} onChange={e => setStudentForm(p => ({...p, name: e.target.value}))} placeholder="e.g. John Doe" />
+              </div>
+              <div>
+                <label className="label">Subjects (Select Multiple) *</label>
+                {!classData?.subjects || classData.subjects.length === 0 ? (
+                  <div className="text-xs text-red-500 font-medium">No subjects assigned to this class yet. Please add subjects to the class first.</div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 border border-gray-100 rounded-xl bg-gray-50/50">
+                    {classData.subjects.map(subName => {
+                      const checked = studentForm.subjects?.includes(subName);
+                      return (
+                        <label key={subName} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100/50 p-1 rounded transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={checked}
+                            onChange={() => {
+                              const nextSubjects = checked 
+                                ? studentForm.subjects.filter(s => s !== subName)
+                                : [...(studentForm.subjects || []), subName];
+                              setStudentForm(p => ({ ...p, subjects: nextSubjects }));
+                            }}
+                            className="rounded border-gray-300 text-jspm-blue focus:ring-jspm-blue"
+                          />
+                          <span className="truncate">{subName}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="label">Initial Password (Optional)</label>

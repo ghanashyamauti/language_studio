@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
-import { Save, Building2, Link as LinkIcon, Settings } from 'lucide-react';
+import { Save, Building2, Upload, Settings } from 'lucide-react';
 import toast from 'react-hot-toast';
+import ImageCropperModal from '../../components/ImageCropperModal';
+
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
 
 export default function AdminSettings() {
   const [form, setForm] = useState({
@@ -14,6 +25,32 @@ export default function AdminSettings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isCropperOpen, setIsCropperOpen] = useState(false);
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setSelectedFile(e.target.files[0]);
+      setIsCropperOpen(true);
+    }
+  };
+
+  const handleCroppedSave = async (croppedFile) => {
+    setIsCropperOpen(false);
+    const formData = new FormData();
+    formData.append('file', croppedFile);
+
+    const loadToast = toast.loading('Uploading logo...');
+    try {
+      const res = await api.post('/admin/upload-logo', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setForm(prev => ({ ...prev, logo_url: res.data.logo_url }));
+      toast.success('Logo uploaded and applied!', { id: loadToast });
+    } catch (err) {
+      toast.error('Failed to upload logo', { id: loadToast });
+    }
+  };
 
   useEffect(() => {
     api.get('/admin/settings').then(r => {
@@ -81,10 +118,16 @@ export default function AdminSettings() {
                   <input type="text" className="input" value={form.college_address} onChange={e => setForm({...form, college_address: e.target.value})} placeholder="e.g. Tathawade, Pune" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Logo URL</label>
-                  <div className="relative">
-                    <LinkIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="url" className="input pl-9" value={form.logo_url} onChange={e => setForm({...form, logo_url: e.target.value})} placeholder="https://example.com/logo.png" />
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Institute Logo (Upload & Crop)</label>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 hover:text-slate-800 rounded-lg cursor-pointer transition-all text-xs font-semibold shadow-sm">
+                      <Upload size={14} />
+                      Choose Photo
+                      <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} onClick={(e) => { e.target.value = null; }} />
+                    </label>
+                    {form.logo_url && (
+                      <span className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">Logo Uploaded</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -124,7 +167,7 @@ export default function AdminSettings() {
           <div className="card bg-gray-50 border-dashed border-2 text-center h-full flex flex-col items-center justify-center p-6">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-6">Live Preview</p>
             {form.logo_url ? (
-              <img src={form.logo_url} alt="College Logo" className="w-24 h-24 object-contain mb-4 rounded-xl shadow-sm bg-white p-2" onError={(e) => { e.target.style.display='none'; }} />
+              <img src={getImageUrl(form.logo_url)} alt="College Logo" className="w-24 h-24 object-contain mb-4 rounded-xl shadow-sm bg-white p-2" onError={(e) => { e.target.style.display='none'; }} />
             ) : (
               <div className="w-24 h-24 bg-gray-200 rounded-xl mb-4 flex items-center justify-center text-gray-400">
                 <Building2 size={32} />
@@ -136,6 +179,16 @@ export default function AdminSettings() {
           </div>
         </div>
       </div>
+
+      <ImageCropperModal
+        isOpen={isCropperOpen}
+        onClose={() => setIsCropperOpen(false)}
+        imageFile={selectedFile}
+        cropWidth={200}
+        cropHeight={200}
+        isRound={false}
+        onSave={handleCroppedSave}
+      />
     </div>
   );
 }

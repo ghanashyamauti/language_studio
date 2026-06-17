@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Plus, Trash2, Pencil, X, BookOpen, Hash, Building2, GraduationCap, User } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -182,7 +183,7 @@ export default function AdminSubjects() {
       </div>
 
       {/* Create / Edit Modal */}
-      {modal === 'edit' && (
+      {modal === 'edit' && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-8">
@@ -246,11 +247,12 @@ export default function AdminSubjects() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete Confirm */}
-      {deleteTarget && (
+      {deleteTarget && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center">
             <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner border border-red-200">
@@ -263,7 +265,8 @@ export default function AdminSubjects() {
               <button onClick={handleDelete} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold transition-colors">Delete</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

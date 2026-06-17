@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Plus, Trash2, Pencil, Users, X, Key, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -36,7 +37,7 @@ function HODForm({ initial, departments, onSave, onCancel }) {
     }));
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-8">
@@ -47,17 +48,39 @@ function HODForm({ initial, departments, onSave, onCancel }) {
           <button type="button" onClick={onCancel} className="p-2 rounded-xl hover:bg-gray-100 transition-colors"><X size={20} className="text-gray-400"/></button>
         </div>
         <div className="space-y-5">
-          {[
-            ['name',       'Full Name',                    'text'],
-            ['phone',      'Phone Number',                 'text'],
-            ['email',      'Email Address (optional)',      'email'],
-          ].map(([k, label, type]) => (
-            <div key={k}>
-              <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">{label}</label>
-              <input type={type} className="input" value={form[k] || ''}
-                onChange={e => set(k, e.target.value)} placeholder={label}/>
-            </div>
-          ))}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Full Name *</label>
+            <input type="text" className="input" value={form.name || ''}
+              onChange={e => set('name', e.target.value)} placeholder="Full Name" required />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Phone Number *</label>
+            <input 
+              type="text" 
+              className="input" 
+              value={form.phone || ''}
+              onChange={e => {
+                const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                set('phone', val);
+              }} 
+              placeholder="e.g. 9876543210" 
+              maxLength={10} 
+              required 
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Email Address *</label>
+            <input 
+              type="email" 
+              className="input" 
+              value={form.email || ''}
+              onChange={e => set('email', e.target.value)} 
+              placeholder="e.g. name@domain.com" 
+              required 
+            />
+          </div>
 
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-2.5 uppercase tracking-wider">Department Assignment(s)</label>
@@ -115,7 +138,8 @@ function HODForm({ initial, departments, onSave, onCancel }) {
           <button type="button" onClick={onCancel} className="btn-secondary flex-1 py-4 font-bold">Cancel</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -144,9 +168,22 @@ export default function AdminHODs() {
   useEffect(() => { load(); }, []);
 
   const handleSave = async (form) => {
-    const payload = { ...form };
+    if (!form.name?.trim()) {
+      return toast.error('Full Name is required');
+    }
+    const cleanedPhone = (form.phone || '').replace(/\D/g, '');
+    if (cleanedPhone.length !== 10 || form.phone?.length !== 10) {
+      return toast.error('Phone number must be exactly 10 digits');
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!form.email || !emailRegex.test(form.email)) {
+      return toast.error('Invalid email address');
+    }
+    if (!editing && (!form.password || form.password.length < 6)) {
+      return toast.error('Initial password of at least 6 characters is required');
+    }
+    const payload = { ...form, phone: cleanedPhone };
     if (!payload.dept_id) payload.dept_id = null;
-    if (payload.email === '') payload.email = null;
     if (payload.department === '') payload.department = null;
     if (editing && !payload.password) delete payload.password;
     try {
@@ -198,7 +235,7 @@ export default function AdminHODs() {
         />
       )}
       
-      {resetPassword && (
+      {resetPassword && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 text-center">
             <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><Key size={28}/></div>
@@ -216,7 +253,8 @@ export default function AdminHODs() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <div className="flex items-center justify-between flex-wrap gap-3">

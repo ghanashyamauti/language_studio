@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request, File, Upl
 from fastapi.responses import StreamingResponse
 import pandas as pd
 import io
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 
 from app.database import get_db
@@ -23,6 +23,7 @@ from app.schemas import (
 )
 from app.pdf_utils import generate_defaulters_pdf, generate_teacher_report_pdf
 from app import activity
+from app.cache import global_cache
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -50,97 +51,39 @@ def _get_creator_name(db: Session, role: str, id: int) -> str:
     return f"{role} #{id}"
 
 
-@router.get("/overview")
-def admin_overview(db: Session = Depends(get_db), user: dict = Depends(require_role("admin"))):
-    # Total stats
-    total_depts = db.query(Department).count()
-    total_hods = db.query(HOD).count()
-    total_teachers = db.query(Teacher).count()
-    total_students = db.query(Student).count()
-    total_classes = db.query(HodClass.class_name).distinct().count()
-    
-    # Detailed department data
-    depts_data = []
-    depts = db.query(Department).all()
-    for d in depts:
-        from app.models import HodDepartment
-        hod_count = db.query(HOD).filter(
-            (HOD.dept_id == d.dept_id) | 
-            HOD.hod_id.in_(db.query(HodDepartment.hod_id).filter(HodDepartment.dept_id == d.dept_id))
-        ).distinct().count()
-        class_count = db.query(HodClass).filter(HodClass.dept_id == d.dept_id).count()
-        subject_count = db.query(Subject).filter(Subject.dept_id == d.dept_id).count()
-        student_count = db.query(Student).filter(Student.class_.in_(
-            db.query(HodClass.class_name).filter(HodClass.dept_id == d.dept_id)
-        )).count()
-        depts_data.append({
-            "dept_id": d.dept_id,
-            "name": d.name,
-            "hod_count": hod_count,
-            "class_count": class_count,
-            "subject_count": subject_count,
-            "student_count": student_count
-        })
-        
-    # All HODs with their classes
-    hods_list = []
-    hods = db.query(HOD).all()
-    for h in hods:
-        hods_list.append({
-            "hod_id": h.hod_id,
-            "name": h.name,
-            "dept_name": ", ".join([d.name for d in h.dept_mappings]) if h.dept_mappings else (h.dept_obj.name if h.dept_obj else h.department),
-            "dept_names": [d.name for d in h.dept_mappings],
-            "dept_ids": [d.dept_id for d in h.dept_mappings],
-            "classes": [hc.class_name for hc in h.hod_classes]
-        })
-        
-    # All Teachers with assignments
-    teachers_list = []
-    teachers = db.query(Teacher).all()
-    for t in teachers:
-        teachers_list.append({
-            "teacher_id": t.teacher_id,
-            "name": t.name,
-            "phone": t.phone,
-            "assignments": [{"subject": a.subject, "class": a.class_} for a in t.assignments]
-        })
-        
-    return {
-        "total_stats": {
-            "departments": total_depts,
-            "hods": total_hods,
-            "teachers": total_teachers,
-            "students": total_students,
-            "classes": total_classes
-        },
-        "departments": depts_data,
-        "hods": hods_list,
-        "teachers": teachers_list
-    }
 
 
 # ── Public stats (no auth) ────────────────────────────────────────────────────
 @router.get("/public-stats", response_model=PublicStatsResponse)
 def public_stats(db: Session = Depends(get_db)):
+    cache_key = "admin:public-stats"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
     all_class_names = set(
         r.class_ for r in db.query(Student.class_).distinct().all()
     ) | set(
         r.class_name for r in db.query(HodClass.class_name).distinct().all()
     )
-    return PublicStatsResponse(
+    res = PublicStatsResponse(
         total_students=db.query(func.count(Student.student_id)).scalar(),
         total_teachers=db.query(func.count(Teacher.teacher_id)).scalar(),
         total_classes=len(all_class_names),
         total_hods=db.query(func.count(HOD.hod_id)).scalar(),
     )
+    global_cache.set(cache_key, res)
+    return res
 
 
 # ── Public settings (no auth — for login page branding) ──────────────────────
 @router.get("/public-settings")
 def public_settings(db: Session = Depends(get_db)):
+    cache_key = "admin:public-settings"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
     s = _get_settings(db)
-    return {
+    res = {
         "college_name": s.college_name,
         "college_short_name": s.college_short_name,
         "college_address": s.college_address,
@@ -148,6 +91,8 @@ def public_settings(db: Session = Depends(get_db)):
         "attendance_threshold": s.attendance_threshold,
         "academic_year": s.academic_year,
     }
+    global_cache.set(cache_key, res)
+    return res
 
 
 # ── College Settings (admin auth) ─────────────────────────────────────────────
@@ -175,6 +120,36 @@ def update_settings(
     db.commit()
     db.refresh(s)
     return s
+
+
+@router.post("/upload-logo")
+def upload_logo(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role("admin")),
+    db: Session = Depends(get_db)
+):
+    import os
+    import uuid
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(400, "Invalid image format")
+    
+    os.makedirs("uploads", exist_ok=True)
+    filename = f"logo_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join("uploads", filename)
+    
+    try:
+        content = file.file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"Could not save file: {e}")
+        
+    url_path = f"/uploads/{filename}"
+    s = _get_settings(db)
+    s.logo_url = url_path
+    db.commit()
+    return {"logo_url": url_path}
 
 
 # ── Student Password Reset (Admin) ────────────────────────────────────────────
@@ -228,6 +203,20 @@ def list_students(
         q = q.filter((Student.name.ilike(f"%{search}%")) | (Student.roll_no.ilike(f"%{search}%")))
         
     students = q.order_by(Student.roll_no).all()
+    
+    # Cache creators to prevent N+1 queries in _get_creator_name
+    admin_cache = {a.admin_id: a.name for a in db.query(Admin.admin_id, Admin.name).all()}
+    hod_cache = {h.hod_id: h.name for h in db.query(HOD.hod_id, HOD.name).all()}
+    
+    def get_cached_creator_name(role: str, actor_id: int) -> str:
+        if not role or not actor_id:
+            return "System"
+        if role == "admin":
+            return admin_cache.get(actor_id, f"Admin #{actor_id}")
+        if role == "hod":
+            return hod_cache.get(actor_id, f"HOD #{actor_id}")
+        return f"{role} #{actor_id}"
+        
     return [
         StudentOut(
             student_id=s.student_id,
@@ -236,7 +225,7 @@ def list_students(
             name=s.name,
             class_=s.class_,
             semester=s.semester,
-            created_by_name=_get_creator_name(db, s.created_by_role, s.created_by_id)
+            created_by_name=get_cached_creator_name(s.created_by_role, s.created_by_id)
         ) for s in students
     ]
 
@@ -269,6 +258,17 @@ def update_student(
     if payload.password and payload.password != "Test@123":
         s.password_hash = hash_password(payload.password)
         s.must_change_password = False
+        
+    if not payload.subjects:
+        raise HTTPException(400, "At least one subject is required")
+        
+    subject_objs = db.query(Subject).filter(Subject.name.in_(payload.subjects)).all()
+    if len(subject_objs) != len(payload.subjects):
+        found = {sub.name for sub in subject_objs}
+        missing = [x for x in payload.subjects if x not in found]
+        raise HTTPException(400, f"Subjects not found in catalog: {', '.join(missing)}")
+        
+    s.subjects = subject_objs
         
     activity.log(db, "admin", int(user["sub"]), user["name"],
                  "UPDATE_STUDENT", target=s.name, ip=request.client.host)
@@ -304,6 +304,15 @@ def admin_create_student(
     if payload.prn and db.query(Student).filter(Student.prn == payload.prn).first():
         raise HTTPException(400, "Student with this PRN already exists")
     
+    if not payload.subjects:
+        raise HTTPException(400, "At least one subject is required")
+        
+    subject_objs = db.query(Subject).filter(Subject.name.in_(payload.subjects)).all()
+    if len(subject_objs) != len(payload.subjects):
+        found = {s.name for s in subject_objs}
+        missing = [x for x in payload.subjects if x not in found]
+        raise HTTPException(400, f"Subjects not found in catalog: {', '.join(missing)}")
+        
     student = Student(
         roll_no=payload.roll_no,
         prn=payload.prn,
@@ -312,7 +321,8 @@ def admin_create_student(
         semester=payload.semester,
         password_hash=hash_password(payload.password or "Test@123"),
         created_by_role="admin",
-        created_by_id=int(user["sub"])
+        created_by_id=int(user["sub"]),
+        subjects=subject_objs
     )
     db.add(student)
     activity.log(db, "admin", int(user["sub"]), user["name"], "CREATE_STUDENT", target=payload.name, ip=request.client.host)
@@ -387,22 +397,45 @@ def _get_creator_name(db: Session, role: str, actor_id: int):
     return f"{role} #{actor_id}"
 
 def _build_report(db, students, start, end, subject=None):
+    student_ids = [s.student_id for s in students]
+    
+    # Bulk query attendance in one query
+    q = db.query(Attendance).filter(
+        Attendance.student_id.in_(student_ids),
+        Attendance.date.between(start, end),
+    )
+    if subject:
+        q = q.filter(Attendance.subject == subject)
+    rows = q.all()
+    
+    # Group in memory
+    att_by_student = {}
+    for r in rows:
+        att_by_student.setdefault(r.student_id, []).append(r)
+        
+    # Cache creators to prevent N+1 queries in _get_creator_name
+    admin_cache = {a.admin_id: a.name for a in db.query(Admin.admin_id, Admin.name).all()}
+    hod_cache = {h.hod_id: h.name for h in db.query(HOD.hod_id, HOD.name).all()}
+    
+    def get_cached_creator_name(role: str, actor_id: int) -> str:
+        if not role or not actor_id:
+            return "System"
+        if role == "admin":
+            return admin_cache.get(actor_id, f"Admin #{actor_id}")
+        if role == "hod":
+            return hod_cache.get(actor_id, f"HOD #{actor_id}")
+        return f"{role} #{actor_id}"
+
     report = []
     for s in students:
-        q = db.query(Attendance).filter(
-            Attendance.student_id == s.student_id,
-            Attendance.date.between(start, end),
-        )
-        if subject:
-            q = q.filter(Attendance.subject == subject)
-        rows = q.all()
-        total = len(rows)
-        attended = sum(1 for r in rows if r.status == "Present")
+        s_rows = att_by_student.get(s.student_id, [])
+        total = len(s_rows)
+        attended = sum(1 for r in s_rows if r.status == "Present")
         percent = (attended / total * 100) if total > 0 else 0.0
         report.append({
             "student_id": s.student_id, "roll_no": s.roll_no, "name": s.name, "class_": s.class_,
             "total": total, "attended": attended, "percent": round(percent, 2),
-            "created_by_name": _get_creator_name(db, s.created_by_role, s.created_by_id)
+            "created_by_name": get_cached_creator_name(s.created_by_role, s.created_by_id)
         })
     return report
 
@@ -411,7 +444,15 @@ def _build_report(db, students, start, end, subject=None):
 # ── Department Management ──────────────────────────────────────────────────────
 @router.get("/departments", response_model=List[DepartmentOut])
 def list_departments(user: dict = Depends(require_role("admin", "hod")), db: Session = Depends(get_db)):
-    return db.query(Department).order_by(Department.name).all()
+    cache_key = "admin:departments"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    res = db.query(Department).order_by(Department.name).all()
+    # Serialize before caching to avoid lazy-load issues
+    result = [{"dept_id": d.dept_id, "name": d.name, "code": d.code, "description": d.description} for d in res]
+    global_cache.set(cache_key, result)
+    return result
 
 
 @router.post("/departments", status_code=201)
@@ -476,32 +517,49 @@ def admin_overview(
     user: dict = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    # Get all entities
+    cache_key = "admin:overview"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Get minimal required entities
     depts = db.query(Department).all()
-    hods = db.query(HOD).all()
-    teachers = db.query(Teacher).all()
+    hods = db.query(HOD).options(
+        joinedload(HOD.hod_classes),
+        joinedload(HOD.dept_obj),
+        joinedload(HOD.dept_mappings)
+    ).all()
+    
+    # Fetch only required fields for Teachers
+    teachers = db.query(Teacher.teacher_id, Teacher.name, Teacher.phone).all()
     classes = db.query(HodClass).all()
-    students = db.query(Student).all()
-    subjects = db.query(Subject).all()
+    
+    # Aggregations to avoid loading massive numbers of Student/Subject objects
+    student_class_counts = db.query(Student.class_, func.count(Student.student_id)).group_by(Student.class_).all()
+    student_class_counts_dict = {c: count for c, count in student_class_counts if c}
+    total_students = sum(student_class_counts_dict.values())
+    student_classes = set(student_class_counts_dict.keys())
+
+    subject_counts = db.query(Subject.dept_id, func.count(Subject.subject_id)).group_by(Subject.dept_id).all()
+    subject_counts_dict = {dept_id: count for dept_id, count in subject_counts if dept_id}
 
     # Build departmental breakdown
     dept_stats = []
     for d in depts:
         d_hods = [h for h in hods if h.dept_id == d.dept_id]
-        d_subjects = [s for s in subjects if s.dept_id == d.dept_id]
         d_classes = [c for c in classes if c.dept_id == d.dept_id]
         
-        class_names = [c.class_name for c in d_classes]
-        d_students = [s for s in students if s.class_ in class_names]
+        d_student_count = sum(student_class_counts_dict.get(c.class_name, 0) for c in d_classes)
+        d_subject_count = subject_counts_dict.get(d.dept_id, 0)
         
         dept_stats.append({
             "dept_id": d.dept_id,
             "name": d.name,
             "code": d.code,
             "hod_count": len(d_hods),
-            "subject_count": len(d_subjects),
+            "subject_count": d_subject_count,
             "class_count": len(d_classes),
-            "student_count": len(d_students),
+            "student_count": d_student_count,
             "hods": [{"id": h.hod_id, "name": h.name} for h in d_hods]
         })
 
@@ -516,15 +574,21 @@ def admin_overview(
             "classes": classes_h,
         })
 
+    # Bulk load teacher assignments to prevent N+1 query loop
+    from collections import defaultdict
+    assignments = db.query(TeacherAssignment).all()
+    assignments_by_teacher = defaultdict(list)
+    for a in assignments:
+        assignments_by_teacher[a.teacher_id].append({"subject": a.subject, "class": a.class_})
+
     teacher_list = []
     for t in teachers:
-        assigns = db.query(TeacherAssignment).filter(TeacherAssignment.teacher_id == t.teacher_id).all()
         teacher_list.append({
             "teacher_id": t.teacher_id, "name": t.name, "phone": t.phone,
-            "assignments": [{"subject": a.subject, "class": a.class_} for a in assigns],
+            "assignments": assignments_by_teacher.get(t.teacher_id, []),
         })
 
-    return {
+    res = {
         "departments": dept_stats,
         "hods": hod_list,
         "teachers": teacher_list,
@@ -532,10 +596,12 @@ def admin_overview(
             "departments": len(depts),
             "hods": len(hods),
             "teachers": len(teachers),
-            "students": len(students),
-            "classes": len(set(s.class_ for s in students) | set(c.class_name for c in classes))
+            "students": total_students,
+            "classes": len(student_classes | set(c.class_name for c in classes))
         }
     }
+    global_cache.set(cache_key, res)
+    return res
 
 
 # ── Analytics ─────────────────────────────────────────────────────────────────
@@ -544,55 +610,92 @@ def admin_analytics(
     user: dict = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
+    cache_key = "admin:analytics"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     """Rich analytics: daily trend, per-class stats, teacher performance."""
     today = datetime.now().date()
     thirty_ago = today - timedelta(days=29)
 
-    # Daily attendance trend (last 30 days)
+    # Daily attendance trend (last 30 days) - Optimized to 1 query
+    daily_stats = db.query(
+        Attendance.date,
+        func.count(Attendance.attendance_id).label("total"),
+        func.sum(func.case((Attendance.status == "Present", 1), else_=0)).label("present")
+    ).filter(
+        Attendance.date.between(thirty_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    ).group_by(Attendance.date).all()
+    
+    daily_map = {row.date: (row.total, int(row.present or 0)) for row in daily_stats}
+
     trend = []
     for i in range(30):
         d = (thirty_ago + timedelta(days=i)).strftime("%Y-%m-%d")
-        total = db.query(func.count(Attendance.attendance_id)).filter(Attendance.date == d).scalar()
-        present = db.query(func.count(Attendance.attendance_id)).filter(
-            Attendance.date == d, Attendance.status == "Present").scalar()
-        trend.append({"date": d, "total": total, "present": present,
-                      "percent": round(present / total * 100, 1) if total else 0})
+        total, present = daily_map.get(d, (0, 0))
+        trend.append({
+            "date": d,
+            "total": total,
+            "present": present,
+            "percent": round(present / total * 100, 1) if total else 0
+        })
 
-    # Per-class attendance overview
+    # Per-class attendance overview - Optimized to 3 query operations
     student_classes = set(r.class_ for r in db.query(Student.class_).distinct().all())
     hod_class_names = set(r.class_name for r in db.query(HodClass.class_name).distinct().all())
     all_classes = sorted(student_classes | hod_class_names)
 
+    student_counts = db.query(
+        Student.class_,
+        func.count(Student.student_id)
+    ).group_by(Student.class_).all()
+    student_count_map = {row[0]: row[1] for row in student_counts}
+
+    attendance_stats = db.query(
+        Attendance.class_,
+        func.count(Attendance.attendance_id).label("total"),
+        func.sum(func.case((Attendance.status == "Present", 1), else_=0)).label("present")
+    ).filter(
+        Attendance.date.between(thirty_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    ).group_by(Attendance.class_).all()
+    attendance_map = {row.class_: (row.total, int(row.present or 0)) for row in attendance_stats}
+
     class_stats = []
     for cls in all_classes:
-        students = db.query(func.count(Student.student_id)).filter(Student.class_ == cls).scalar()
-        att = db.query(Attendance).filter(
-            Attendance.class_ == cls,
-            Attendance.date.between(thirty_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
-        ).all()
-        total_att = len(att)
-        present_att = sum(1 for a in att if a.status == "Present")
+        students = student_count_map.get(cls, 0)
+        total_att, present_att = attendance_map.get(cls, (0, 0))
         class_stats.append({
             "class_name": cls,
             "students": students,
             "attendance_percent": round(present_att / total_att * 100, 1) if total_att else 0,
         })
 
-    # Teacher performance: sessions marked in last 30 days
+    # Teacher performance: sessions marked in last 30 days - Optimized to 3 query operations
     teachers = db.query(Teacher).all()
+
+    sessions_stats = db.query(
+        Attendance.teacher_id,
+        func.count(func.distinct(func.concat(Attendance.class_, Attendance.subject, Attendance.date)))
+    ).filter(
+        Attendance.date.between(thirty_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    ).group_by(Attendance.teacher_id).all()
+    sessions_map = {row[0]: row[1] for row in sessions_stats}
+
+    max_dates = db.query(
+        Attendance.teacher_id,
+        func.max(Attendance.date)
+    ).group_by(Attendance.teacher_id).all()
+    max_date_map = {row[0]: row[1] for row in max_dates}
+
     teacher_perf = []
     for t in teachers:
-        sessions = db.query(func.count(func.distinct(
-            func.concat(Attendance.class_, Attendance.subject, Attendance.date)
-        ))).filter(
-            Attendance.teacher_id == t.teacher_id,
-            Attendance.date.between(thirty_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
-        ).scalar()
-        last_marked = db.query(func.max(Attendance.date)).filter(Attendance.teacher_id == t.teacher_id).scalar()
+        sessions = sessions_map.get(t.teacher_id, 0)
+        last_marked = max_date_map.get(t.teacher_id, None)
         teacher_perf.append({
             "teacher_id": t.teacher_id,
             "name": t.name,
-            "sessions_last_30d": sessions or 0,
+            "sessions_last_30d": sessions,
             "last_marked": last_marked,
         })
     teacher_perf.sort(key=lambda x: x["sessions_last_30d"], reverse=True)
@@ -619,20 +722,31 @@ def admin_analytics(
         if pct < 75:
             defaulter_count += 1
 
-    return {
+    res = {
         "trend": trend,
         "class_stats": class_stats,
         "teacher_performance": teacher_perf,
         "defaulter_count": defaulter_count,
         "period": {"start": start_str, "end": end_str},
     }
+    global_cache.set(cache_key, res)
+    return res
 
 
 # ── HOD Management ────────────────────────────────────────────────────────────
 @router.get("/hods", response_model=List[HODOut])
 def list_hods(user: dict = Depends(require_role("admin")), db: Session = Depends(get_db)):
-    hods = db.query(HOD).order_by(HOD.name).all()
-    return [
+    cache_key = "admin:hods"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    hods = db.query(HOD).options(
+        joinedload(HOD.dept_obj),
+        selectinload(HOD.dept_mappings),
+        selectinload(HOD.hod_classes)
+    ).order_by(HOD.name).all()
+    res = [
         HODOut(
             hod_id=h.hod_id, name=h.name, phone=h.phone, email=h.email,
             department=h.department, dept_id=h.dept_id,
@@ -643,6 +757,8 @@ def list_hods(user: dict = Depends(require_role("admin")), db: Session = Depends
             created_at=h.created_at
         ) for h in hods
     ]
+    global_cache.set(cache_key, res)
+    return res
 
 
 @router.post("/hods", status_code=201)
@@ -781,24 +897,49 @@ def assign_class_to_hod(
 @router.get("/classes")
 def list_classes(user: dict = Depends(require_role("admin")), db: Session = Depends(get_db)):
     """Return all strictly valid classes from the catalog with rich details."""
-    classes = db.query(HodClass).all()
+    cache_key = "admin:classes"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    classes = db.query(HodClass).options(
+        joinedload(HodClass.dept_obj),
+        selectinload(HodClass.dept_mappings)
+    ).all()
+    
+    # 1. Fetch student count per class in a single query
+    student_counts = db.query(
+        Student.class_,
+        func.count(Student.student_id)
+    ).group_by(Student.class_).all()
+    student_count_map = {row[0]: row[1] for row in student_counts}
+    
+    # 2. Fetch HOD name and department mappings in a single query
+    hods = db.query(HOD).options(joinedload(HOD.dept_obj)).all()
+    hod_map = {h.hod_id: h for h in hods}
+    
+    # 3. Fetch ClassSubject mappings in a single query
+    class_subjects = db.query(ClassSubject.class_name, ClassSubject.subject_id).all()
+    subjects_by_class = {}
+    for class_name, subject_id in class_subjects:
+        subjects_by_class.setdefault(class_name, []).append(subject_id)
+        
     result = []
     for c in classes:
-        student_count = db.query(Student).filter(Student.class_ == c.class_name).count()
-        hod_name = db.query(HOD.name).filter(HOD.hod_id == c.hod_id).scalar() if c.hod_id else None
-        # Get dept info from dept_id if available, else from HOD's dept
+        student_count = student_count_map.get(c.class_name, 0)
+        
+        hod = hod_map.get(c.hod_id) if c.hod_id else None
+        hod_name = hod.name if hod else None
+        
         dept_name = None
         dept_id = c.dept_id
         if c.dept_obj:
             dept_name = c.dept_obj.name
-        elif c.hod_id:
-            hod = db.query(HOD).filter(HOD.hod_id == c.hod_id).first()
-            if hod and hod.dept_obj:
-                dept_name = hod.dept_obj.name
-                dept_id = hod.dept_id
-        # Get subjects assigned to this class
-        class_subjects = db.query(ClassSubject.subject_id).filter(ClassSubject.class_name == c.class_name).all()
-        assigned_subject_ids = [s[0] for s in class_subjects]
+        elif hod and hod.dept_obj:
+            dept_name = hod.dept_obj.name
+            dept_id = hod.dept_id
+            
+        assigned_subject_ids = subjects_by_class.get(c.class_name, [])
         
         dept_ids = [d.dept_id for d in c.dept_mappings]
         dept_names = [d.name for d in c.dept_mappings]
@@ -820,7 +961,9 @@ def list_classes(user: dict = Depends(require_role("admin")), db: Session = Depe
             "student_count": student_count,
             "assigned_subjects": assigned_subject_ids
         })
-    return sorted(result, key=lambda x: x["class_name"])
+    result = sorted(result, key=lambda x: x["class_name"])
+    global_cache.set(cache_key, result)
+    return result
 
 @router.post("/classes", status_code=201)
 def create_class(
@@ -976,18 +1119,43 @@ def delete_class(
 # ── Teacher Management ────────────────────────────────────────────────────────
 @router.get("/teachers", response_model=List[TeacherOut])
 def list_teachers(user: dict = Depends(require_role("admin")), db: Session = Depends(get_db)):
-    teachers = db.query(Teacher).order_by(Teacher.name).all()
-    return [
+    cache_key = "admin:teachers"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    teachers = db.query(Teacher).options(
+        joinedload(Teacher.dept_obj),
+        selectinload(Teacher.assignments)
+    ).order_by(Teacher.name).all()
+    
+    # Cache creators to prevent N+1 queries in _get_creator_name
+    admin_cache = {a.admin_id: a.name for a in db.query(Admin.admin_id, Admin.name).all()}
+    hod_cache = {h.hod_id: h.name for h in db.query(HOD.hod_id, HOD.name).all()}
+    
+    def get_cached_creator_name(role: str, actor_id: int) -> str:
+        if not role or not actor_id:
+            return "System"
+        if role == "admin":
+            return admin_cache.get(actor_id, f"Admin #{actor_id}")
+        if role == "hod":
+            return hod_cache.get(actor_id, f"HOD #{actor_id}")
+        return f"{role} #{actor_id}"
+
+    res = [
         TeacherOut(
             teacher_id=t.teacher_id, 
             name=t.name, 
             phone=t.phone,
+            email=t.email,
             dept_id=t.dept_id,
             dept_name=t.dept_obj.name if t.dept_obj else None,
             assignments=[{"id": a.assignment_id, "subject": a.subject, "class": a.class_} for a in t.assignments],
-            created_by_name=_get_creator_name(db, t.created_by_role, t.created_by_id)
+            created_by_name=get_cached_creator_name(t.created_by_role, t.created_by_id)
         ) for t in teachers
     ]
+    global_cache.set(cache_key, res)
+    return res
 
 
 @router.post("/teachers", status_code=201)
@@ -997,12 +1165,17 @@ def create_teacher(
     user: dict = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    # Check if teacher exists (by phone or name)
-    existing = db.query(Teacher).filter((Teacher.phone == payload.phone) | (func.lower(Teacher.name) == payload.name.lower().strip())).first()
+    email_val = payload.email.lower().strip()
+    # Check if teacher exists (by phone, email, or name)
+    existing = db.query(Teacher).filter(
+        (Teacher.phone == payload.phone) | 
+        (Teacher.email == email_val) | 
+        (func.lower(Teacher.name) == payload.name.lower().strip())
+    ).first()
     if existing:
-        raise HTTPException(400, f"Teacher with phone '{payload.phone}' or name '{payload.name}' already exists")
+        raise HTTPException(400, f"Teacher with phone '{payload.phone}', email '{payload.email}' or name '{payload.name}' already exists")
     t = Teacher(
-        name=payload.name, phone=payload.phone,
+        name=payload.name.strip(), phone=payload.phone.strip(), email=email_val,
         dept_id=payload.dept_id,
         password_hash=hash_password(payload.password),
         created_by_role="admin",
@@ -1031,9 +1204,16 @@ def update_teacher(
     if payload.phone != t.phone:
         if db.query(Teacher).filter(Teacher.phone == payload.phone).first():
             raise HTTPException(400, "Phone already in use")
+            
+    # Check if email is being changed to an existing one
+    email_val = payload.email.lower().strip()
+    if email_val != (t.email or "").lower().strip():
+        if db.query(Teacher).filter(Teacher.email == email_val).first():
+            raise HTTPException(400, "Email already in use")
     
-    t.name = payload.name
-    t.phone = payload.phone
+    t.name = payload.name.strip()
+    t.phone = payload.phone.strip()
+    t.email = email_val
     t.dept_id = payload.dept_id
     if payload.password:
         t.password_hash = hash_password(payload.password)
@@ -1086,14 +1266,37 @@ def remove_assignment(
 # ── Subject Management ────────────────────────────────────────────────────────
 @router.get("/subjects", response_model=List[SubjectOut])
 def list_subjects(user: dict = Depends(require_role("admin", "hod")), db: Session = Depends(get_db)):
-    subjects = db.query(Subject).order_by(Subject.name).all()
+    cache_key = "admin:subjects"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    subjects = db.query(Subject).options(
+        joinedload(Subject.dept_obj),
+        selectinload(Subject.dept_mappings)
+    ).order_by(Subject.name).all()
+    
+    # 1. Fetch ClassSubject mappings in a single query
+    class_subjects = db.query(ClassSubject.subject_id, ClassSubject.class_name).all()
+    classes_by_subject = {}
+    for subject_id, class_name in class_subjects:
+        classes_by_subject.setdefault(subject_id, []).append(class_name)
+        
+    # 2. Cache creators to prevent N+1 queries in _get_creator_name
+    admin_cache = {a.admin_id: a.name for a in db.query(Admin.admin_id, Admin.name).all()}
+    hod_cache = {h.hod_id: h.name for h in db.query(HOD.hod_id, HOD.name).all()}
+    
+    def get_cached_creator_name(role: str, actor_id: int) -> str:
+        if not role or not actor_id:
+            return "System"
+        if role == "admin":
+            return admin_cache.get(actor_id, f"Admin #{actor_id}")
+        if role == "hod":
+            return hod_cache.get(actor_id, f"HOD #{actor_id}")
+        return f"{role} #{actor_id}"
+
     result = []
     for s in subjects:
-        # Find all classes where this subject is taught
-        class_mappings = db.query(ClassSubject.class_name).filter(ClassSubject.subject_id == s.subject_id).all()
-        assigned_classes = sorted(list(set([m[0] for m in class_mappings])))
-        
-        # Get multiple departments
+        assigned_classes = sorted(list(set(classes_by_subject.get(s.subject_id, []))))
         dept_ids = [d.dept_id for d in s.dept_mappings]
         dept_names = [d.name for d in s.dept_mappings]
         
@@ -1104,9 +1307,10 @@ def list_subjects(user: dict = Depends(require_role("admin", "hod")), db: Sessio
             dept_ids=dept_ids,
             dept_names=dept_names,
             assigned_classes=assigned_classes,
-            created_by_name=_get_creator_name(db, s.created_by_role, s.created_by_id)
+            created_by_name=get_cached_creator_name(s.created_by_role, s.created_by_id)
         ))
         
+    global_cache.set(cache_key, result)
     return result
 
 
@@ -1546,13 +1750,7 @@ def export_csv(
     
     if subject and subject.strip():
         subj_name = subject.strip()
-        mapped_classes = db.query(ClassSubject.class_name).join(Subject).filter(Subject.name == subj_name).all()
-        assigned_classes = db.query(TeacherAssignment.class_).filter(TeacherAssignment.subject == subj_name).all()
-        subj_classes = list(set([c[0] for c in mapped_classes] + [c[0] for c in assigned_classes]))
-        if subj_classes:
-            q = q.filter(Student.class_.in_(subj_classes))
-        else:
-            q = q.filter(Student.student_id == -1)
+        q = q.join(Student.subjects).filter(Subject.name == subj_name)
 
     if type == "teachers":
         q_teach = db.query(Teacher)
@@ -1635,13 +1833,7 @@ def export_pdf(
         
     if subject and subject.strip():
         subj_name = subject.strip()
-        mapped_classes = db.query(ClassSubject.class_name).join(Subject).filter(Subject.name == subj_name).all()
-        assigned_classes = db.query(TeacherAssignment.class_).filter(TeacherAssignment.subject == subj_name).all()
-        subj_classes = list(set([c[0] for c in mapped_classes] + [c[0] for c in assigned_classes]))
-        if subj_classes:
-            q = q.filter(Student.class_.in_(subj_classes))
-        else:
-            q = q.filter(Student.student_id == -1)
+        q = q.join(Student.subjects).filter(Subject.name == subj_name)
 
     students = q.order_by(Student.roll_no).all()
     
@@ -1702,23 +1894,36 @@ def import_students(
     if not db.query(HodClass).filter(HodClass.class_name == payload.class_).first():
         raise HTTPException(400, f"Class '{payload.class_}' does not exist. Please create it in the system first.")
 
-    for i, raw in enumerate(payload.data.splitlines(), 1):
-        line = raw.strip()
-        if not line:
+    f = StringIO(payload.data)
+    reader = csv.reader(f)
+    for i, parts in enumerate(reader, 1):
+        parts = [p.strip() for p in parts]
+        if not parts or all(not p for p in parts):
             continue
-        roll = prn = name = None
-        if "," in line:
-            parts = [p.strip() for p in line.split(",") if p.strip()]
-            if len(parts) >= 3:
-                roll, prn, name = parts[0], parts[1], ",".join(parts[2:]).strip()
-        else:
-            parts = line.split()
-            if len(parts) >= 3:
-                roll, prn = parts[0], parts[1]
-                name = " ".join(parts[2:])
-        if not roll or not prn or not name:
-            errors.append(f"Line {i}: invalid format")
+        if len(parts) < 4:
+            # Fallback to check if it's space-separated, but subjects are comma-separated or similar.
+            # However, with csv.reader, it's best to expect 4 fields: roll, prn, name, subjects
+            errors.append(f"Line {i}: invalid format (needs roll_no, prn, name, subjects)")
             continue
+            
+        roll, prn, name, subjects_str = parts[0], parts[1], parts[2], parts[3]
+        if not roll or not prn or not name or not subjects_str:
+            errors.append(f"Line {i}: roll_no, prn, name, and subjects are all mandatory")
+            continue
+            
+        s_temp = subjects_str.replace(";", ",").replace("|", ",")
+        subject_names = [s.strip() for s in s_temp.split(",") if s.strip()]
+        if not subject_names:
+            errors.append(f"Line {i}: subjects list is empty")
+            continue
+            
+        subject_objs = db.query(Subject).filter(Subject.name.in_(subject_names)).all()
+        if len(subject_objs) != len(subject_names):
+            found_names = {sub.name for sub in subject_objs}
+            missing = [n for n in subject_names if n not in found_names]
+            errors.append(f"Line {i}: subjects '{', '.join(missing)}' do not exist in catalog")
+            continue
+
         existing = db.query(Student).filter((Student.roll_no == roll) | (Student.prn == prn)).first()
         if existing:
             if existing.roll_no != roll and db.query(Student).filter(Student.roll_no == roll).first():
@@ -1726,12 +1931,14 @@ def import_students(
                  continue
             existing.prn = prn; existing.name = name
             existing.class_ = payload.class_; existing.semester = payload.semester
+            existing.subjects = subject_objs
             updated += 1
         else:
             db.add(Student(roll_no=roll, prn=prn, name=name,
                            class_=payload.class_, semester=payload.semester,
                            password_hash=hash_password("Test@123"),
-                           created_by_role=user["role"], created_by_id=int(user["sub"])))
+                           created_by_role=user["role"], created_by_id=int(user["sub"]),
+                           subjects=subject_objs))
             added += 1
     activity.log(db, user["role"], int(user["sub"]), user["name"],
                  "IMPORT_STUDENTS", target=payload.class_,
@@ -1754,23 +1961,24 @@ def import_teachers(
         if not line:
             continue
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 4: # Class is optional in some contexts but here we need it for assignment
-            errors.append(f"Line {i}: need name,phone,password,subject,class")
+        if len(parts) < 5: # Need email as well
+            errors.append(f"Line {i}: need name,phone,email,password,subject,class")
             continue
         
-        # Name, Phone, Password, Subject, Class
+        # Name, Phone, Email, Password, Subject, Class
         name = parts[0]
         phone = parts[1]
-        password = parts[2] if len(parts) > 2 and parts[2].strip() else "Teacher@123"
-        subject = parts[3] if len(parts) > 3 else "Unknown"
-        cls = ",".join(parts[4:]) if len(parts) > 4 else "Unknown"
+        email = parts[2]
+        password = parts[3] if len(parts) > 3 and parts[3].strip() else "Teacher@123"
+        subject = parts[4] if len(parts) > 4 else "Unknown"
+        cls = ",".join(parts[5:]) if len(parts) > 5 else "Unknown"
         
-        existing = db.query(Teacher).filter((Teacher.phone == phone) | (Teacher.name == name)).first()
+        existing = db.query(Teacher).filter((Teacher.phone == phone) | (Teacher.email == email) | (Teacher.name == name)).first()
         if existing:
-            existing.name = name; existing.phone = phone
+            existing.name = name; existing.phone = phone; existing.email = email.lower().strip()
             teacher_id = existing.teacher_id; updated += 1
         else:
-            t = Teacher(name=name, phone=phone, 
+            t = Teacher(name=name, phone=phone, email=email.lower().strip(),
                         password_hash=hash_password(password),
                         must_change_password=True,
                         created_by_role=user["role"], created_by_id=int(user["sub"]))
@@ -1838,21 +2046,22 @@ async def import_teachers_from_file(
         try:
             name = str(row['name']).strip()
             phone = str(row['phone']).strip()
+            email = str(row.get('email', '')).strip()
             password = str(row.get('password', 'Teacher@123')).strip()
             if password == 'nan' or not password: password = "Teacher@123"
             subject = str(row['subject']).strip()
             cls = str(row['class']).strip()
             
-            if not name or name == 'nan' or not phone or phone == 'nan':
-                errors.append(f"Row {i+2}: Missing name or phone")
+            if not name or name == 'nan' or not phone or phone == 'nan' or not email or email == 'nan':
+                errors.append(f"Row {i+2}: Missing name, phone, or email")
                 continue
                 
-            existing = db.query(Teacher).filter((Teacher.phone == phone) | (Teacher.name == name)).first()
+            existing = db.query(Teacher).filter((Teacher.phone == phone) | (Teacher.email == email) | (Teacher.name == name)).first()
             if existing:
-                existing.name = name; existing.phone = phone
+                existing.name = name; existing.phone = phone; existing.email = email.lower().strip()
                 teacher_id = existing.teacher_id; updated += 1
             else:
-                t = Teacher(name=name, phone=phone, 
+                t = Teacher(name=name, phone=phone, email=email.lower().strip(),
                             password_hash=hash_password(password),
                             must_change_password=True,
                             created_by_role=user["role"], created_by_id=int(user["sub"]))
@@ -1908,9 +2117,9 @@ def get_student_import_template():
     """Download a template CSV for student import."""
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["roll_no", "prn", "name"])
-    writer.writerow(["T23CO001", "23CO001", "John Doe"])
-    writer.writerow(["T23CO002", "23CO002", "Jane Smith"])
+    writer.writerow(["roll_no", "prn", "name", "subjects"])
+    writer.writerow(["T23CO001", "23CO001", "John Doe", "FBDA, BSE"])
+    writer.writerow(["T23CO002", "23CO002", "Jane Smith", "BSE"])
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue().encode("utf-8")]),
@@ -1944,13 +2153,13 @@ async def import_students_from_file(
     df.columns = [c.lower().strip().replace(' ', '_') for c in df.columns]
     
     # Required columns check
-    required = {'roll_no', 'prn', 'name'}
+    required = {'roll_no', 'prn', 'name', 'subjects'}
     if not required.issubset(df.columns):
         # Try to find columns by position if names don't match
-        if len(df.columns) >= 3:
-            df.columns = ['roll_no', 'prn', 'name'] + list(df.columns[3:])
+        if len(df.columns) >= 4:
+            df.columns = ['roll_no', 'prn', 'name', 'subjects'] + list(df.columns[4:])
         else:
-            raise HTTPException(400, f"File must have at least 3 columns: roll_no, prn, name. Found: {list(df.columns)}")
+            raise HTTPException(400, f"File must have at least 4 columns: roll_no, prn, name, subjects. Found: {list(df.columns)}")
 
     added = updated = 0
     errors = []
@@ -1964,11 +2173,25 @@ async def import_students_from_file(
             roll = str(row['roll_no']).strip()
             prn = str(row['prn']).strip()
             name = str(row['name']).strip()
+            subjects_str = str(row['subjects']).strip()
             
-            if not roll or roll == 'nan' or not name or name == 'nan':
-                errors.append(f"Row {i+2}: Missing roll_no or name")
+            if not roll or roll == 'nan' or not name or name == 'nan' or not subjects_str or subjects_str == 'nan':
+                errors.append(f"Row {i+2}: Missing roll_no, name, or subjects")
                 continue
                 
+            s_temp = subjects_str.replace(";", ",").replace("|", ",")
+            subject_names = [s.strip() for s in s_temp.split(",") if s.strip()]
+            if not subject_names:
+                errors.append(f"Row {i+2}: Subjects list is empty")
+                continue
+                
+            subject_objs = db.query(Subject).filter(Subject.name.in_(subject_names)).all()
+            if len(subject_objs) != len(subject_names):
+                found_names = {sub.name for sub in subject_objs}
+                missing = [n for n in subject_names if n not in found_names]
+                errors.append(f"Row {i+2}: Subjects '{', '.join(missing)}' do not exist in catalog")
+                continue
+
             existing = db.query(Student).filter((Student.roll_no == roll) | (Student.prn == prn)).first()
             if existing:
                 if existing.roll_no != roll and db.query(Student).filter(Student.roll_no == roll).first():
@@ -1978,13 +2201,15 @@ async def import_students_from_file(
                 existing.name = name
                 existing.class_ = class_
                 existing.semester = semester
+                existing.subjects = subject_objs
                 updated += 1
             else:
                 db.add(Student(
                     roll_no=roll, prn=prn, name=name,
                     class_=class_, semester=semester,
                     password_hash=hash_password("Test@123"),
-                    created_by_role=user["role"], created_by_id=int(user["sub"])
+                    created_by_role=user["role"], created_by_id=int(user["sub"]),
+                    subjects=subject_objs
                 ))
                 added += 1
         except Exception as e:
@@ -1996,3 +2221,6 @@ async def import_students_from_file(
                  ip=request.client.host if request else None)
     db.commit()
     return {"added": added, "updated": updated, "errors": errors}
+
+
+

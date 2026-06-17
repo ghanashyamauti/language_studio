@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Upload, Download, FileText, Table, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
@@ -26,8 +27,11 @@ export default function BulkImportModal({ isOpen, onClose, type, classes = [], d
 
   if (!isOpen) return null;
 
-  const filteredClasses = deptId 
-    ? classes.filter(c => String(c.dept_id) === String(deptId))
+  const filteredClasses = deptId
+    ? classes.filter(c =>
+        String(c.dept_id) === String(deptId) ||
+        (Array.isArray(c.dept_ids) && c.dept_ids.map(String).includes(String(deptId)))
+      )
     : classes;
 
   const handleDownloadTemplate = async () => {
@@ -96,8 +100,8 @@ export default function BulkImportModal({ isOpen, onClose, type, classes = [], d
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="p-6 border-b border-gray-100 flex items-center justify-between">
@@ -119,7 +123,7 @@ export default function BulkImportModal({ isOpen, onClose, type, classes = [], d
               </h3>
               <p className="text-xs text-blue-700 leading-relaxed">
                 {type === 'student' 
-                  ? "Paste data in format: RollNo PRN FullName (one per line)." 
+                  ? "Paste data in CSV format: roll_no,prn,name,\"subjects\" (one per line). Subjects must be comma-separated inside double quotes and are mandatory." 
                   : "Columns: Name, Phone, Password, Subject, Class. Password is optional."
                 }
               </p>
@@ -171,20 +175,20 @@ export default function BulkImportModal({ isOpen, onClose, type, classes = [], d
 
           {/* Input Area */}
           {importMethod === 'file' ? (
-            <div className="border-2 border-dashed border-gray-200 rounded-3xl p-10 text-center hover:border-jspm-blue transition-colors group relative bg-gray-50/50">
+            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-5 hover:border-jspm-blue transition-colors group relative bg-gray-50/50">
               <input 
                 type="file" 
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
                 accept=".csv, .xlsx, .xls"
                 onChange={e => setFile(e.target.files[0])}
               />
-              <div className="space-y-3">
-                <div className="w-14 h-14 bg-white text-jspm-blue rounded-2xl flex items-center justify-center mx-auto shadow-sm group-hover:scale-110 transition-transform">
-                  <Upload size={28} />
+              <div className="flex items-center gap-4">
+                <div className="w-11 h-11 bg-white text-jspm-blue rounded-xl flex items-center justify-center shadow-sm flex-shrink-0 group-hover:scale-110 transition-transform">
+                  <Upload size={22} />
                 </div>
                 <div>
-                  <p className="font-bold text-gray-700">{file ? file.name : 'Choose a file'}</p>
-                  <p className="text-xs text-gray-400">CSV, XLSX or XLS formats supported</p>
+                  <p className="font-bold text-gray-700 text-sm">{file ? file.name : 'Click or drag a file here'}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">CSV, XLSX or XLS formats supported</p>
                 </div>
               </div>
             </div>
@@ -193,7 +197,7 @@ export default function BulkImportModal({ isOpen, onClose, type, classes = [], d
               className="input h-48 font-mono text-xs leading-relaxed" 
               value={pasteData}
               onChange={e => setPasteData(e.target.value)}
-              placeholder={type === 'student' ? "T23CO001 23CO001 John Doe\nT23CO002 23CO002 Jane Smith" : "Name, Phone, Password, Subject, Class"}
+              placeholder={type === 'student' ? "T23CO001,23CO001,John Doe,\"Maths, Science\"\nT23CO002,23CO002,Jane Smith,\"Maths\"" : "Name, Phone, Password, Subject, Class"}
             />
           )}
 
@@ -230,6 +234,7 @@ export default function BulkImportModal({ isOpen, onClose, type, classes = [], d
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

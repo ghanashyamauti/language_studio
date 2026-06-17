@@ -2,14 +2,14 @@ import csv
 import re
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app import activity
 from app.auth import require_role, verify_password, hash_password
-from app.models import Teacher, TeacherAssignment, Student, Attendance, Notification
+from app.models import Teacher, TeacherAssignment, Student, Attendance, Notification, Subject
 from app.schemas import MarkAttendanceRequest, ChangePasswordRequest
 from app.pdf_utils import generate_attendance_pdf
 
@@ -48,8 +48,9 @@ def get_students_for_class(
     db: Session = Depends(get_db),
 ):
     selected_date = date or datetime.now().strftime("%Y-%m-%d")
-    students = db.query(Student).filter(
-        Student.class_ == class_
+    students = db.query(Student).join(Student.subjects).filter(
+        Student.class_ == class_,
+        Subject.name == subject
     ).order_by(Student.roll_no).all()
 
     existing = db.query(Attendance).filter(
@@ -134,18 +135,30 @@ def teacher_report(
         start = (end_date - timedelta(days=6)).strftime("%Y-%m-%d")
         end = end_date.strftime("%Y-%m-%d")
 
-    students = db.query(Student).filter(Student.class_ == cls).all()
+    students = db.query(Student).join(Student.subjects).filter(
+        Student.class_ == cls,
+        Subject.name == subject
+    ).all()
+    student_ids = [s.student_id for s in students]
+
+    # Bulk query attendance records
+    attendance_rows = db.query(Attendance.student_id, Attendance.status).filter(
+        Attendance.student_id.in_(student_ids),
+        Attendance.subject == subject,
+        Attendance.class_ == cls,
+        Attendance.date.between(start, end)
+    ).all()
+
+    # Group in memory
+    att_by_student = {}
+    for s_id, status in attendance_rows:
+        att_by_student.setdefault(s_id, []).append(status)
 
     report = []
     for s in students:
-        rows = db.query(Attendance).filter(
-            Attendance.student_id == s.student_id,
-            Attendance.subject == subject,
-            Attendance.class_ == cls,
-            Attendance.date.between(start, end),
-        ).all()
+        rows = att_by_student.get(s.student_id, [])
         total = len(rows)
-        attended = sum(1 for r in rows if r.status == "Present")
+        attended = sum(1 for status in rows if status == "Present")
         percent = (attended / total * 100) if total > 0 else 0.0
         report.append({
             "roll_no": s.roll_no,
@@ -195,14 +208,21 @@ def teacher_performance(
 
     # Sessions per class per subject in last 30 days
     assigns = db.query(TeacherAssignment).filter(TeacherAssignment.teacher_id == teacher_id).all()
+    
+    # Bulk query distinct class/subject/date
+    attendance_rows = db.query(Attendance.class_, Attendance.subject, Attendance.date).filter(
+        Attendance.teacher_id == teacher_id,
+        Attendance.date.between(start, end)
+    ).distinct().all()
+    
+    # Group in memory
+    sessions_by_class_subject = {}
+    for class_, subject, date in attendance_rows:
+        sessions_by_class_subject.setdefault((class_, subject), set()).add(date)
+
     stats = []
     for a in assigns:
-        dates = db.query(Attendance.date).filter(
-            Attendance.teacher_id == teacher_id,
-            Attendance.class_ == a.class_,
-            Attendance.subject == a.subject,
-            Attendance.date.between(start, end),
-        ).distinct().all()
+        dates = sessions_by_class_subject.get((a.class_, a.subject), set())
         stats.append({"class_": a.class_, "subject": a.subject, "sessions_marked": len(dates)})
 
     last_marked = db.query(Attendance.date).filter(
@@ -241,7 +261,10 @@ def export_csv(
         start = (end_date - timedelta(days=6)).strftime("%Y-%m-%d")
         end = end_date.strftime("%Y-%m-%d")
 
-    students = db.query(Student).filter(Student.class_ == cls).order_by(Student.roll_no).all()
+    students = db.query(Student).join(Student.subjects).filter(
+        Student.class_ == cls,
+        Subject.name == subject
+    ).order_by(Student.roll_no).all()
     time_rows = db.query(Attendance.time).filter(
         Attendance.class_ == cls, Attendance.subject == subject,
         Attendance.date.between(start, end), Attendance.time.isnot(None),
@@ -286,7 +309,10 @@ def export_pdf(
         start = (end_date - timedelta(days=6)).strftime("%Y-%m-%d")
         end = end_date.strftime("%Y-%m-%d")
 
-    students = db.query(Student).filter(Student.class_ == cls).order_by(Student.roll_no).all()
+    students = db.query(Student).join(Student.subjects).filter(
+        Student.class_ == cls,
+        Subject.name == subject
+    ).order_by(Student.roll_no).all()
     time_rows = db.query(Attendance.time).filter(
         Attendance.class_ == cls, Attendance.subject == subject,
         Attendance.date.between(start, end), Attendance.time.isnot(None),
@@ -339,3 +365,37 @@ def change_password(
     teacher.must_change_password = False
     db.commit()
     return {"message": "Password updated successfully"}
+
+
+@router.post("/upload-profile")
+def upload_profile(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role("teacher")),
+    db: Session = Depends(get_db)
+):
+    import os
+    import uuid
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(400, "Invalid image format")
+    
+    os.makedirs("uploads", exist_ok=True)
+    filename = f"teacher_{user['sub']}_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join("uploads", filename)
+    
+    try:
+        content = file.file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"Could not save file: {e}")
+        
+    teacher_id = int(user["sub"])
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(404, "Teacher not found")
+        
+    url_path = f"/uploads/{filename}"
+    teacher.profile_photo = url_path
+    db.commit()
+    return {"profile_photo": url_path}

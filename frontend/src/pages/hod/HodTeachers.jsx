@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Shield, Plus, X, Phone, User, Search, Trash2, Pencil, BookOpen, ChevronDown, Table } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -14,9 +15,14 @@ export default function HodTeachers() {
   const [importModal, setImportModal] = useState(false);
   const [editId, setEditId] = useState(null);
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ name: '', phone: '', password: '' });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', password: '' });
   const [newAssign, setNewAssign] = useState({ subject: '', class_name: '' });
   const [stagedAssigns, setStagedAssigns] = useState([]);
+
+  const handlePhoneChange = (e) => {
+    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setForm(p => ({ ...p, phone: val }));
+  };
 
   const load = async () => {
     try {
@@ -34,14 +40,14 @@ export default function HodTeachers() {
   useEffect(() => { load(); }, []);
 
   const openCreate = () => {
-    setForm({ name: '', phone: '', password: 'Teacher@123' });
+    setForm({ name: '', phone: '', email: '', password: 'Teacher@123' });
     setEditId(null);
     setStagedAssigns([]);
     setModal(true);
   };
 
   const openEdit = (t) => {
-    setForm({ name: t.name, phone: t.phone, password: '' });
+    setForm({ name: t.name, phone: t.phone, email: t.email || '', password: '' });
     setEditId(t.teacher_id);
     setStagedAssigns([]);
     setModal(true);
@@ -49,22 +55,34 @@ export default function HodTeachers() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const cleanedPhone = form.phone.replace(/\D/g, '');
+    if (cleanedPhone.length !== 10 || form.phone.length !== 10) {
+      toast.error('Phone number must be exactly 10 digits');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(form.email)) {
+      toast.error('Invalid email address');
+      return;
+    }
     try {
       if (editId) {
         await api.patch(`/hod/teachers/${editId}`, {
           name: form.name,
-          phone: form.phone
+          phone: cleanedPhone,
+          email: form.email
         });
         toast.success('Teacher profile updated');
       } else {
         await api.post('/hod/teachers', {
           ...form,
+          phone: cleanedPhone,
           assignments: stagedAssigns
         });
         toast.success('Teacher created with assignments');
       }
       setModal(false);
-      setForm({ name: '', phone: '', password: '' });
+      setForm({ name: '', phone: '', email: '', password: '' });
       setStagedAssigns([]);
       load();
     } catch (err) {
@@ -200,12 +218,17 @@ export default function HodTeachers() {
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-jspm-navy truncate">{t.name}</h3>
-                <div className="flex items-center gap-1.5 text-gray-500 text-xs mt-1">
+                <div className="flex items-center gap-1.5 text-gray-500 text-xs mt-1 flex-wrap">
                   <span className="px-1.5 py-0.5 bg-gray-100 rounded-md font-bold uppercase tracking-wider text-[10px]">
                     {t.dept_name || 'General'}
                   </span>
                   <span>{t.phone || 'No phone'}</span>
                 </div>
+                {t.email && (
+                  <div className="text-[11px] text-gray-400 mt-1 truncate">
+                    {t.email}
+                  </div>
+                )}
                 
                 {t.assignments?.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-gray-50 flex flex-wrap gap-1">
@@ -231,7 +254,7 @@ export default function HodTeachers() {
         )}
       </div>
 
-      {modal && (
+      {modal && createPortal(
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
@@ -244,12 +267,31 @@ export default function HodTeachers() {
                 <h4 className="text-sm font-bold text-gray-500 uppercase flex items-center gap-2"><Shield size={14}/> Profile</h4>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Full Name</label>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Full Name *</label>
                     <input className="input" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} required />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Phone Number</label>
-                    <input className="input" value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))} required />
+                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Phone Number *</label>
+                    <input 
+                      type="text"
+                      className="input" 
+                      value={form.phone} 
+                      onChange={handlePhoneChange} 
+                      required 
+                      placeholder="e.g. 9876543210"
+                      maxLength={10}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Email Address *</label>
+                    <input 
+                      type="email"
+                      className="input" 
+                      value={form.email} 
+                      onChange={e => setForm(f => ({...f, email: e.target.value}))} 
+                      required 
+                      placeholder="e.g. name@domain.com"
+                    />
                   </div>
                   {!editId && (
                     <div>
@@ -312,7 +354,8 @@ export default function HodTeachers() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Bulk Import Modal */}
       <BulkImportModal 

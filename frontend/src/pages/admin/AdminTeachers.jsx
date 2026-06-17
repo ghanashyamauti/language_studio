@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Plus, Trash2, Pencil, X, Shield, Key, BookOpen, GraduationCap, Building2, User, ChevronDown, Table } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -13,7 +14,7 @@ export default function AdminTeachers() {
   const [showChoiceModal, setShowChoiceModal] = useState(false);
   const [importModal, setImportModal] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ name: '', phone: '', password: '', dept_id: '' });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', password: '', dept_id: '' });
   const [newAssign, setNewAssign] = useState({ subject: '', class_name: '' });
   const [loading, setLoading] = useState(false);
 
@@ -34,22 +35,37 @@ export default function AdminTeachers() {
 
   useEffect(() => { load(); }, []);
 
+  const handlePhoneChange = (e) => {
+    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setForm(p => ({ ...p, phone: val }));
+  };
+
   const openCreate = () => {
-    setForm({ name: '', phone: '', password: '', dept_id: '' });
+    setForm({ name: '', phone: '', email: '', password: '', dept_id: '' });
     setEditId(null);
     setModal('edit');
   };
 
   const openEdit = (t) => {
-    setForm({ name: t.name, phone: t.phone, password: '', dept_id: t.dept_id || '' });
+    setForm({ name: t.name, phone: t.phone, email: t.email || '', password: '', dept_id: t.dept_id || '' });
     setEditId(t.teacher_id);
     setModal('edit');
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
+    const cleanedPhone = form.phone.replace(/\D/g, '');
+    if (cleanedPhone.length !== 10 || form.phone.length !== 10) {
+      toast.error('Phone number must be exactly 10 digits');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(form.email)) {
+      toast.error('Invalid email address');
+      return;
+    }
     setLoading(true);
-    const payload = { ...form };
+    const payload = { ...form, phone: cleanedPhone };
     if (!payload.dept_id) payload.dept_id = null;
     if (editId && !payload.password) delete payload.password;
     try {
@@ -152,7 +168,10 @@ export default function AdminTeachers() {
                 </div>
                 <div>
                   <h3 className="font-bold text-jspm-navy text-lg leading-tight">{t.name}</h3>
-                  <p className="text-xs text-gray-400 mt-1">{t.phone || 'No phone'}</p>
+                  <div className="text-xs text-gray-400 mt-1 space-y-0.5">
+                    <div>{t.phone || 'No phone'}</div>
+                    {t.email && <div className="text-[11px] text-gray-500 font-medium">{t.email}</div>}
+                  </div>
                 </div>
               </div>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -186,7 +205,7 @@ export default function AdminTeachers() {
         ))}
       </div>
 
-      {modal === 'edit' && (
+      {modal === 'edit' && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-8">
@@ -204,7 +223,26 @@ export default function AdminTeachers() {
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-gray-500 mb-1.5 block uppercase">Phone Number *</label>
-                    <input type="text" className="input" value={form.phone} onChange={e => setForm(p => ({...p, phone: e.target.value}))} required />
+                    <input 
+                      type="text" 
+                      className="input" 
+                      value={form.phone} 
+                      onChange={handlePhoneChange} 
+                      required 
+                      placeholder="e.g. 9876543210" 
+                      maxLength={10} 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 mb-1.5 block uppercase">Email Address *</label>
+                    <input 
+                      type="email" 
+                      className="input" 
+                      value={form.email} 
+                      onChange={e => setForm(p => ({...p, email: e.target.value}))} 
+                      required 
+                      placeholder="e.g. name@domain.com" 
+                    />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-gray-500 mb-1.5 block uppercase">Primary Department</label>
@@ -268,7 +306,8 @@ export default function AdminTeachers() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Bulk Import Modal */}
       <BulkImportModal 

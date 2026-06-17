@@ -17,6 +17,12 @@ class Department(Base):
     classes = relationship("HodClass", back_populates="dept_obj", cascade="all, delete")
 
 
+class StudentSubject(Base):
+    __tablename__ = "student_subjects"
+    student_id = Column(Integer, ForeignKey("students.student_id", ondelete="CASCADE"), primary_key=True)
+    subject_id = Column(Integer, ForeignKey("subjects.subject_id", ondelete="CASCADE"), primary_key=True)
+
+
 class Student(Base):
     __tablename__ = "students"
     student_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -27,10 +33,13 @@ class Student(Base):
     semester = Column(Integer, nullable=False, default=2)
     password_hash = Column(String, nullable=False)
     must_change_password = Column(Boolean, default=True, nullable=False)
+    profile_photo = Column(String, nullable=True)
     attendance = relationship("Attendance", back_populates="student", cascade="all, delete")
+    subjects = relationship("Subject", secondary="student_subjects", back_populates="students")
     created_by_role = Column(String, nullable=True)
     created_by_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 
 class Teacher(Base):
@@ -38,9 +47,11 @@ class Teacher(Base):
     teacher_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
     phone = Column(String, unique=True)
+    email = Column(String, unique=True, nullable=True)
     password_hash = Column(String, nullable=False)
     dept_id = Column(Integer, ForeignKey("departments.dept_id", ondelete="SET NULL"), nullable=True)
     must_change_password = Column(Boolean, default=True, nullable=False)
+    profile_photo = Column(String, nullable=True)
     
     dept_obj = relationship("Department")
     assignments = relationship("TeacherAssignment", back_populates="teacher", cascade="all, delete")
@@ -78,6 +89,7 @@ class HOD(Base):
     dept_id = Column(Integer, ForeignKey("departments.dept_id", ondelete="SET NULL"), nullable=True)
     password_hash = Column(String, nullable=False)
     created_by_admin_id = Column(Integer, ForeignKey("admins.admin_id", ondelete="SET NULL"), nullable=True)
+    profile_photo = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     dept_obj = relationship("Department", back_populates="hods")
@@ -177,6 +189,8 @@ class Subject(Base):
     dept_obj = relationship("Department", back_populates="subjects")
     class_mappings = relationship("ClassSubject", back_populates="subject", cascade="all, delete")
     dept_mappings = relationship("Department", secondary="subject_departments", backref="subject_objs")
+    students = relationship("Student", secondary="student_subjects", back_populates="subjects")
+
 
 class ClassSubject(Base):
     __tablename__ = "class_subjects"

@@ -40,13 +40,13 @@ import HodReports from './pages/hod/HodReports';
 import TeacherSelect from './pages/teacher/TeacherSelect';
 import TeacherMark from './pages/teacher/TeacherMark';
 import TeacherReport from './pages/teacher/TeacherReport';
-import TeacherPassword from './pages/teacher/TeacherPassword';
+import TeacherSettings from './pages/teacher/TeacherSettings';
 import TeacherPerformance from './pages/teacher/TeacherPerformance';
 
 // Student
 import StudentDashboard from './pages/student/StudentDashboard';
 import StudentCalendar from './pages/student/StudentCalendar';
-import StudentPassword from './pages/student/StudentPassword';
+import StudentSettings from './pages/student/StudentSettings';
 import StudentNotifications from './pages/student/StudentNotifications';
 
 export default function App() {
@@ -101,7 +101,7 @@ export default function App() {
             <Route path="mark" element={<TeacherMark />} />
             <Route path="report" element={<TeacherReport />} />
             <Route path="performance" element={<TeacherPerformance />} />
-            <Route path="change-password" element={<TeacherPassword />} />
+            <Route path="settings" element={<TeacherSettings />} />
           </Route>
 
           {/* Student */}
@@ -110,7 +110,7 @@ export default function App() {
             <Route path="dashboard" element={<StudentDashboard />} />
             <Route path="calendar" element={<StudentCalendar />} />
             <Route path="notifications" element={<StudentNotifications />} />
-            <Route path="change-password" element={<StudentPassword />} />
+            <Route path="settings" element={<StudentSettings />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/login" replace />} />

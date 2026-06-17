@@ -1,16 +1,70 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
-import { User, Mail, Phone, Building2, Save } from 'lucide-react';
+import { User, Mail, Phone, Building2, Save, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
+import ImageCropperModal from '../../components/ImageCropperModal';
+
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
 
 export default function HodSettings() {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', department: '' });
+  const { user, setUser } = useAuth();
+  const [form, setForm] = useState({ name: '', email: '', phone: '', department: '', profile_photo: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isCropperOpen, setIsCropperOpen] = useState(false);
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setSelectedFile(e.target.files[0]);
+      setIsCropperOpen(true);
+    }
+  };
+
+  const handleCroppedSave = async (croppedFile) => {
+    setIsCropperOpen(false);
+    const formData = new FormData();
+    formData.append('file', croppedFile);
+
+    const loadToast = toast.loading('Uploading profile photo...');
+    try {
+      const res = await api.post('/hod/upload-profile', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const newPhoto = res.data.profile_photo;
+      setForm(prev => ({ ...prev, profile_photo: newPhoto }));
+      
+      const newUser = {
+        ...user,
+        extra: {
+          ...user.extra,
+          profile_photo: newPhoto
+        }
+      };
+      localStorage.setItem('user', JSON.stringify(newUser));
+      setUser(newUser);
+      
+      toast.success('Profile photo updated!', { id: loadToast });
+    } catch (err) {
+      toast.error('Failed to upload profile photo', { id: loadToast });
+    }
+  };
 
   useEffect(() => {
     api.get('/hod/profile').then(r => {
-      setForm(r.data);
+      setForm(prev => ({
+        ...prev,
+        ...r.data
+      }));
       setLoading(false);
     }).catch(() => {
       toast.error('Failed to load profile');
@@ -42,6 +96,36 @@ export default function HodSettings() {
 
       <div className="card">
         <form onSubmit={handleSave} className="space-y-5">
+          {/* Profile Photo Upload Section */}
+          <div className="flex flex-col items-center sm:flex-row gap-5 pb-5 border-b border-gray-100">
+            <div className="relative group">
+              {form.profile_photo ? (
+                <img 
+                  src={getImageUrl(form.profile_photo)} 
+                  alt="Profile" 
+                  className="w-24 h-24 rounded-full object-cover border-2 border-purple-500/20 shadow-md" 
+                />
+              ) : (
+                <div className="w-24 h-24 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-3xl font-bold border-2 border-purple-500/20 shadow-inner select-none">
+                  {form.name?.[0]?.toUpperCase() || '?'}
+                </div>
+              )}
+              <label className="absolute inset-0 rounded-full bg-black/40 text-white flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-semibold">
+                <Upload size={16} />
+                Upload Photo
+                <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} onClick={(e) => { e.target.value = null; }} />
+              </label>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-base">{form.name || 'Your Name'}</h3>
+              <p className="text-xs text-slate-500 capitalize">{user?.role === 'hod' ? 'Manager' : user?.role}</p>
+              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 mt-2 border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer text-xs font-semibold text-slate-600 shadow-sm transition-all">
+                <Upload size={12} /> Change Photo
+                <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} onClick={(e) => { e.target.value = null; }} />
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Full Name</label>
@@ -103,6 +187,16 @@ export default function HodSettings() {
           </p>
         </div>
       </div>
+
+      <ImageCropperModal
+        isOpen={isCropperOpen}
+        onClose={() => setIsCropperOpen(false)}
+        imageFile={selectedFile}
+        cropWidth={200}
+        cropHeight={200}
+        isRound={true}
+        onSave={handleCroppedSave}
+      />
     </div>
   );
 }

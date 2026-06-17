@@ -30,7 +30,21 @@ class StudentOut(BaseModel):
     class_: str
     semester: int
     created_by_name: Optional[str] = None
+    subjects: List[str] = []
     model_config = {"from_attributes": True}
+
+    @field_validator("subjects", mode="before")
+    @classmethod
+    def serialize_subjects(cls, v):
+        if not v:
+            return []
+        res = []
+        for x in v:
+            if isinstance(x, str):
+                res.append(x)
+            elif hasattr(x, "name"):
+                res.append(x.name)
+        return res
 
 class CreateStudentRequest(BaseModel):
     roll_no: str
@@ -39,6 +53,8 @@ class CreateStudentRequest(BaseModel):
     class_: str
     semester: int = 2
     password: Optional[str] = "Test@123"
+    subjects: List[str] = []
+
 
 class AttendanceRecord(BaseModel):
     date: str
@@ -84,25 +100,51 @@ class BulkAttendanceCorrectionRequest(BaseModel):
 class CreateHODRequest(BaseModel):
     name: str
     phone: str
-    email: Optional[str] = None
+    email: str
     department: Optional[str] = None
     dept_id: Optional[int] = None
     dept_ids: List[int] = []
     password: Optional[str] = None
     class_names: Optional[List[str]] = []
 
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        cleaned = "".join(c for c in v if c.isdigit())
+        if len(cleaned) != 10 or len(v) != 10:
+            raise ValueError("Mobile number must be exactly 10 digits")
+        return cleaned
+
 class UpdateTeacherRequest(BaseModel):
     name: str
     phone: str
+    email: str
     dept_id: Optional[int] = None
     password: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        cleaned = "".join(c for c in v if c.isdigit())
+        if len(cleaned) != 10 or len(v) != 10:
+            raise ValueError("Mobile number must be exactly 10 digits")
+        return cleaned
 
 class CreateTeacherRequest(BaseModel):
     name: str
     phone: str
+    email: str
     password: str
     dept_id: Optional[int] = None
     assignments: Optional[List[dict]] = []
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        cleaned = "".join(c for c in v if c.isdigit())
+        if len(cleaned) != 10 or len(v) != 10:
+            raise ValueError("Mobile number must be exactly 10 digits")
+        return cleaned
 
 class HODOut(BaseModel):
     hod_id: int
@@ -122,6 +164,7 @@ class TeacherOut(BaseModel):
     teacher_id: int
     name: str
     phone: str
+    email: Optional[str] = None
     dept_id: Optional[int] = None
     dept_name: Optional[str] = None
     assignments: List[dict] = []

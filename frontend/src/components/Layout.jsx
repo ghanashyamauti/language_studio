@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../api/client';
+
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
 import {
   LayoutDashboard, Users, BookOpen, ClipboardList, LogOut, Upload, Layers,
   FileText, Activity, ChevronRight, BarChart2, Bell, Calendar, GraduationCap,
@@ -9,15 +20,15 @@ import {
 
 const navConfig = {
   admin: [
-    { to: '/admin/overview', icon: Home, label: 'Overview' },
-    { to: '/admin/analytics', icon: BarChart2, label: 'Analytics' },
+    { to: '/admin/overview', icon: Home, label: 'Dashboard' },
+    { to: '/admin/departments', icon: Layers, label: 'Departments' },
     { to: '/admin/hods', icon: Users, label: 'Managers' },
     { to: '/admin/teachers', icon: Shield, label: 'Teachers' },
     { to: '/admin/classes', icon: GraduationCap, label: 'Classes' },
     { to: '/admin/students', icon: Users, label: 'Students' },
-    { to: '/admin/departments', icon: Layers, label: 'Departments' },
     { to: '/admin/subjects', icon: BookOpen, label: 'Subjects' },
     { to: '/admin/reports', icon: ClipboardList, label: 'Reports' },
+    { to: '/admin/analytics', icon: BarChart2, label: 'Analytics' },
     { to: '/admin/bulk-correction', icon: PenSquare, label: 'Bulk Correction' },
     { to: '/admin/holidays', icon: Calendar, label: 'Holidays' },
     { to: '/admin/notifications', icon: Bell, label: 'Notifications' },
@@ -37,13 +48,13 @@ const navConfig = {
     { to: '/teacher/select', icon: PenSquare, label: 'Mark Attendance' },
     { to: '/teacher/report', icon: FileText, label: 'Report' },
     { to: '/teacher/performance', icon: TrendingUp, label: 'My Performance' },
-    { to: '/teacher/change-password', icon: Lock, label: 'Change Password' },
+    { to: '/teacher/settings', icon: Settings, label: 'Settings' },
   ],
   student: [
     { to: '/student/dashboard', icon: LayoutDashboard, label: 'My Attendance' },
     { to: '/student/calendar', icon: Calendar, label: 'Calendar' },
     { to: '/student/notifications', icon: Bell, label: 'Notifications' },
-    { to: '/student/change-password', icon: Lock, label: 'Change Password' },
+    { to: '/student/settings', icon: Settings, label: 'Settings' },
   ],
 };
 
@@ -51,8 +62,14 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settings, setSettings] = useState(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const role = user?.role || 'student';
   const links = navConfig[role] || [];
+
+  useEffect(() => {
+    api.get('/admin/public-settings').then(r => setSettings(r.data)).catch(() => { });
+  }, []);
 
   // Close sidebar on route change
   const location = useLocation();
@@ -61,8 +78,7 @@ export default function Layout() {
   }, [location.pathname]);
 
   const handleLogout = () => {
-    logout();
-    navigate('/login');
+    setShowLogoutConfirm(true);
   };
 
   const roleColors = {
@@ -76,7 +92,7 @@ export default function Layout() {
     <div className="flex h-screen bg-jspm-bg overflow-hidden relative">
       {/* Mobile overlay */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
@@ -85,31 +101,23 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className={`fixed md:relative z-50 h-full w-64 bg-gradient-to-b ${roleColors[role]} text-white flex flex-col shadow-2xl transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         {/* Logo */}
-        <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <img src="/lcs-logo.png" alt="LCS" className="w-10 h-10 rounded-lg object-contain bg-white/10 p-1" />
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            {settings?.logo_url ? (
+              <img src={getImageUrl(settings.logo_url)} alt="LCS" className="w-12 h-12 rounded-lg object-contain bg-white p-1 shadow-sm" onError={(e) => { e.target.style.display = 'none'; }} />
+            ) : (
+              <img src="/lcs-logo.png" alt="LCS" className="w-12 h-12 rounded-lg object-contain bg-white p-1 shadow-sm" />
+            )}
             <div>
-              <div className="text-white font-bold text-sm leading-tight">Language Craft Studio</div>
-              <div className="text-white/50 text-xs capitalize">{role === 'hod' ? 'Manager' : role} Portal</div>
+              <div className="text-white font-bold text-xs leading-tight">Language Craft Studio</div>
+              <div className="text-white/50 text-[15px] capitalize leading-none scale-75 origin-left">{role === 'hod' ? 'Manager' : role} Portal</div>
             </div>
           </div>
           <button className="md:hidden text-white/70" onClick={() => setSidebarOpen(false)}>
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        {/* User info */}
-        <div className="px-4 py-3 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm">
-              {user?.name?.[0]?.toUpperCase() || '?'}
-            </div>
-            <div>
-              <div className="text-white text-xs font-semibold truncate max-w-[130px]">{user?.name}</div>
-              <div className="text-white/40 text-xs capitalize">{role}</div>
-            </div>
-          </div>
-        </div>
 
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
@@ -131,20 +139,39 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="p-4 border-t border-white/10">
+        {/* User Info & Logout */}
+        <div className="p-3 border-t border-white/10 space-y-2.5">
+          <div className="flex items-center gap-2.5 px-0.5">
+            {user?.extra?.profile_photo ? (
+              <img
+                src={getImageUrl(user.extra.profile_photo)}
+                alt="Profile"
+                className="w-8 h-8 rounded-full object-cover border border-white/20 animate-scaleUp"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-xs select-none animate-scaleUp">
+                {user?.name?.[0]?.toUpperCase() || '?'}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-white text-xs font-semibold truncate leading-snug">{user?.name}</div>
+              <div className="text-white/40 text-[10px] capitalize leading-none mt-0.5">{role === 'hod' ? 'Manager' : role}</div>
+            </div>
+          </div>
+
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-white/65 hover:bg-red-500/20 hover:text-red-300 transition-all text-sm font-medium"
+            className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-white/65 hover:bg-red-500/20 hover:text-red-300 transition-all text-xs font-medium"
           >
-            <LogOut size={16} />
+            <LogOut size={14} />
             <span>Sign Out</span>
           </button>
         </div>
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col min-h-screen overflow-hidden">
+      <main className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Top Header for mobile toggle */}
         <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 shadow-sm z-10">
           <div className="flex items-center gap-4">
@@ -163,6 +190,32 @@ export default function Layout() {
           </div>
         </div>
       </main>
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 animate-scaleUp">
+            <h3 className="text-lg font-bold text-slate-900">Sign Out</h3>
+            <p className="text-slate-600 text-sm mt-2">Are you sure you want to sign out of your account?</p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 text-sm font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowLogoutConfirm(false);
+                  logout();
+                  navigate('/login');
+                }}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

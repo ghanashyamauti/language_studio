@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Users, Plus, X, Search, GraduationCap, Phone, Hash, Trash2, Lock, ChevronDown, User, Table, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -15,12 +16,19 @@ export default function HodStudents() {
   const [search, setSearch] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
   const [classes, setClasses] = useState([]);
-  const [form, setForm] = useState({ name: '', roll_no: '', prn: '', class_: '', semester: 2, password: '' });
+  const [departments, setDepartments] = useState([]);
+  const [form, setForm] = useState({ name: '', roll_no: '', prn: '', class_: '', semester: 2, password: '', subjects: [] });
 
   const load = async () => {
     try {
       const dashRes = await api.get('/hod/dashboard');
       setClasses(dashRes.data.classes || []);
+      try {
+        const deptRes = await api.get('/admin/departments');
+        setDepartments(deptRes.data || []);
+      } catch (err) {
+        console.error('Failed to load departments:', err);
+      }
       setLoading(false);
     } catch { setLoading(false); }
   };
@@ -46,9 +54,13 @@ export default function HodStudents() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.subjects || form.subjects.length === 0) {
+      toast.error('Please select at least one subject');
+      return;
+    }
     try {
       if (editMode && selectedStudent) {
-        await api.put(`/hod/students/${selectedStudent.student_id}`, form);
+        await api.patch(`/hod/students/${selectedStudent.student_id}`, form);
         toast.success('Student updated successfully');
       } else {
         await api.post('/hod/students', form);
@@ -63,7 +75,7 @@ export default function HodStudents() {
   };
 
   const resetForm = () => {
-    setForm({ name: '', roll_no: '', prn: '', class_: '', semester: 2, password: '' });
+    setForm({ name: '', roll_no: '', prn: '', class_: '', semester: 2, password: '', subjects: [] });
     setEditMode(false);
     setSelectedStudent(null);
   };
@@ -75,7 +87,8 @@ export default function HodStudents() {
       prn: s.prn || '',
       class_: s.class_,
       semester: s.semester,
-      password: ''
+      password: '',
+      subjects: s.subjects || []
     });
     setSelectedStudent(s);
     setEditMode(true);
@@ -195,6 +208,15 @@ export default function HodStudents() {
                 <div className="text-xs text-gray-500 mt-1 flex flex-col gap-1">
                   <span className="flex items-center gap-1.5"><Hash size={12}/> {s.roll_no}</span>
                   <span className="flex items-center gap-1.5 font-semibold text-jspm-blue">{s.class_} · Sem {s.semester}</span>
+                  {s.subjects && s.subjects.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1 border-t border-gray-100 pt-2">
+                      {s.subjects.map(subName => (
+                        <span key={subName} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px] font-medium border border-slate-200">
+                          {subName}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -219,8 +241,8 @@ export default function HodStudents() {
         )}
       </div>
 
-      {modal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      {modal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-xl text-jspm-navy">{editMode ? 'Edit Student' : 'Add New Student'}</h3>
@@ -257,12 +279,47 @@ export default function HodStudents() {
                 <label className="label">Class</label>
                 <select 
                   className="input" required
-                  value={form.class_} onChange={e => setForm({...form, class_: e.target.value})}
+                  value={form.class_} onChange={e => setForm({...form, class_: e.target.value, subjects: []})}
                 >
                   <option value="">— Select Class —</option>
                   {classes.map(c => <option key={c.class_name} value={c.class_name}>{c.class_name}</option>)}
                 </select>
               </div>
+
+              {form.class_ && (() => {
+                const selectedClassObj = classes.find(c => c.class_name === form.class_);
+                const classSubjects = selectedClassObj ? (selectedClassObj.subjects || []) : [];
+                return (
+                  <div>
+                    <label className="label">Subjects (Select Multiple) *</label>
+                    {classSubjects.length === 0 ? (
+                      <div className="text-xs text-red-500 font-medium">No subjects assigned to this class yet. Please add subjects to the class first.</div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 border border-gray-100 rounded-xl bg-gray-50/50">
+                        {classSubjects.map(subName => {
+                          const checked = form.subjects.includes(subName);
+                          return (
+                            <label key={subName} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100/50 p-1 rounded transition-colors">
+                              <input 
+                                type="checkbox" 
+                                checked={checked}
+                                onChange={() => {
+                                  const nextSubjects = checked 
+                                    ? form.subjects.filter(s => s !== subName)
+                                    : [...form.subjects, subName];
+                                  setForm(p => ({ ...p, subjects: nextSubjects }));
+                                }}
+                                className="rounded border-gray-300 text-jspm-blue focus:ring-jspm-blue"
+                              />
+                              <span className="truncate">{subName}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div>
                 <label className="label">Semester</label>
                 <input 
@@ -289,7 +346,8 @@ export default function HodStudents() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Bulk Import Modal */}
       <BulkImportModal 
@@ -297,6 +355,7 @@ export default function HodStudents() {
         onClose={() => setImportModal(false)} 
         type="student"
         classes={classes}
+        departments={departments}
         onSuccess={fetchAllStudents}
         apiUrlPrefix="/hod"
       />

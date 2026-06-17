@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Users, Plus, X, Search, GraduationCap, Hash, Trash2, Pencil, Lock, Building2, Layers, User, Table, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -27,8 +28,33 @@ export default function AdminStudents() {
     prn: '',
     class_: '',
     semester: 2,
-    password: ''
+    password: '',
+    subjects: []
   });
+
+  const [availableSubjects, setAvailableSubjects] = useState([]);
+  const [loadingSubjects, setLoadingSubjects] = useState(false);
+
+  const fetchClassSubjects = async (className) => {
+    if (!className) {
+      setAvailableSubjects([]);
+      return;
+    }
+    setLoadingSubjects(true);
+    try {
+      const res = await api.get(`/admin/classes/${className}/subjects`);
+      setAvailableSubjects(res.data || []);
+    } catch {
+      toast.error('Failed to load class subjects');
+    } finally {
+      setLoadingSubjects(false);
+    }
+  };
+
+  const handleClassChange = (className) => {
+    setForm(prev => ({ ...prev, class_: className, subjects: [] }));
+    fetchClassSubjects(className);
+  };
 
   const loadMetadata = async () => {
     try {
@@ -74,7 +100,8 @@ export default function AdminStudents() {
   };
 
   const resetForm = () => {
-    setForm({ name: '', roll_no: '', prn: '', class_: '', semester: 2, password: '' });
+    setForm({ name: '', roll_no: '', prn: '', class_: '', semester: 2, password: '', subjects: [] });
+    setAvailableSubjects([]);
     setEditMode(false);
     setSelectedStudent(null);
   };
@@ -91,15 +118,23 @@ export default function AdminStudents() {
       prn: s.prn || '',
       class_: s.class_,
       semester: s.semester,
-      password: ''
+      password: '',
+      subjects: s.subjects || []
     });
     setSelectedStudent(s);
     setEditMode(true);
     setModal(true);
+    if (s.class_) {
+      fetchClassSubjects(s.class_);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.subjects || form.subjects.length === 0) {
+      toast.error('Please select at least one subject');
+      return;
+    }
     try {
       if (editMode && selectedStudent) {
         await api.patch(`/admin/students/${selectedStudent.student_id}`, form);
@@ -260,6 +295,17 @@ export default function AdminStudents() {
                     </div>
                   )}
                 </div>
+
+                {s.subjects && s.subjects.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1 border-t border-gray-100 pt-3">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block w-full mb-0.5">Enrolled Subjects:</span>
+                    {s.subjects.map(subName => (
+                      <span key={subName} className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px] font-medium border border-slate-200">
+                        {subName}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -278,7 +324,7 @@ export default function AdminStudents() {
       )}
 
       {/* Modal */}
-      {modal && (
+      {modal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-6">
@@ -317,12 +363,45 @@ export default function AdminStudents() {
                 <label className="text-[10px] font-bold text-gray-500 mb-1.5 block uppercase">Class *</label>
                 <select 
                   className="input" required
-                  value={form.class_} onChange={e => setForm({...form, class_: e.target.value})}
+                  value={form.class_} onChange={e => handleClassChange(e.target.value)}
                 >
                   <option value="">— Select Class —</option>
                   {classes.map(c => <option key={c.class_name} value={c.class_name}>{c.class_name}</option>)}
                 </select>
               </div>
+
+              {form.class_ && (
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 mb-1.5 block uppercase">Subjects (Select Multiple) *</label>
+                  {loadingSubjects ? (
+                    <div className="text-xs text-gray-400">Loading subjects...</div>
+                  ) : availableSubjects.length === 0 ? (
+                    <div className="text-xs text-red-500 font-medium">No subjects assigned to this class yet. Please add subjects to the class first.</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 border border-gray-100 rounded-xl bg-gray-50/50">
+                      {availableSubjects.map(subName => {
+                        const checked = form.subjects.includes(subName);
+                        return (
+                          <label key={subName} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100/50 p-1 rounded transition-colors">
+                            <input 
+                              type="checkbox" 
+                              checked={checked}
+                              onChange={() => {
+                                const nextSubjects = checked 
+                                  ? form.subjects.filter(s => s !== subName)
+                                  : [...form.subjects, subName];
+                                setForm(p => ({ ...p, subjects: nextSubjects }));
+                              }}
+                              className="rounded border-gray-300 text-jspm-blue focus:ring-jspm-blue"
+                            />
+                            <span className="truncate">{subName}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="text-[10px] font-bold text-gray-500 mb-1.5 block uppercase">Semester *</label>
                 <input 
@@ -349,7 +428,8 @@ export default function AdminStudents() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Bulk Import Modal */}
       <BulkImportModal 

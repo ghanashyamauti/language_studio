@@ -29,9 +29,10 @@ Base.metadata.create_all(bind=engine)
 print("[OK] All tables created")
 
 # ── Seed admin ─────────────────────────────────────────────────────────────
-ADMIN_NAME     = "Admin"
-ADMIN_EMAIL    = "admin@languagestudio.com"
-ADMIN_PASSWORD = "Admin@123"
+ADMIN_NAME     = os.getenv("SEED_ADMIN_NAME", "Admin")
+ADMIN_EMAIL    = os.getenv("SEED_ADMIN_EMAIL", "admin@languagestudio.com")
+ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "Admin@123")
+
 
 Session = sessionmaker(bind=engine)
 db = Session()

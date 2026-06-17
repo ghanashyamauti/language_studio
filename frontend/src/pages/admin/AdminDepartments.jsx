@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Plus, Trash2, Pencil, X, Building2, Users, GraduationCap, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -16,12 +17,11 @@ export default function AdminDepartments() {
 
   const load = async () => {
     try {
-      const [depts, overview] = await Promise.all([
-        api.get('/admin/departments'),
-        api.get('/admin/overview')
-      ]);
+      // Load departments first (fast) — show UI immediately
+      const depts = await api.get('/admin/departments');
       setDepartments(depts.data);
-      setStats(overview.data.departments || []);
+      // Then load overview stats in background (may be slower on cold cache)
+      api.get('/admin/overview').then(r => setStats(r.data.departments || [])).catch(() => {});
     } catch (e) { toast.error('Failed to load data'); }
   };
 
@@ -134,7 +134,7 @@ export default function AdminDepartments() {
       </div>
 
       {/* Modal */}
-      {modal === 'edit' && (
+      {modal === 'edit' && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95">
             <div className="flex items-center justify-between mb-8">
@@ -160,11 +160,12 @@ export default function AdminDepartments() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete confirm */}
-      {deleteTarget && (
+      {deleteTarget && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center">
             <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><Trash2 size={28} /></div>
@@ -175,7 +176,8 @@ export default function AdminDepartments() {
               <button onClick={handleDelete} className="btn-danger flex-1 font-bold">Delete</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request, File, Upl
 from fastapi.responses import StreamingResponse
 import pandas as pd
 import io
+from io import StringIO
 import csv
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, or_
 
 from app.database import get_db
@@ -17,9 +18,10 @@ from app.schemas import (CreateClassRequest, AssignTeacherRequest, HodReportRow,
                          RemoveStudentRequest, ChangePasswordRequest,
                          ClassImportRequest, NotificationCreate,
                          AdminResetPasswordRequest, UpdateProfileRequest,
-                         CreateTeacherRequest, CreateStudentRequest, SubjectCreate, SubjectUpdate, SubjectOut,
-                         TeacherImportRequest)
+                         CreateTeacherRequest, UpdateTeacherRequest, CreateStudentRequest, SubjectCreate, SubjectUpdate, SubjectOut,
+                         TeacherImportRequest, StudentOut)
 from app.pdf_utils import generate_attendance_pdf
+from app.cache import global_cache
 
 router = APIRouter(prefix="/hod", tags=["hod"])
 
@@ -40,7 +42,8 @@ def get_profile(
         "department": hod.dept_obj.name if hod.dept_obj else hod.department,
         "dept_id": hod.dept_id,
         "dept_ids": [d.dept_id for d in hod.dept_mappings],
-        "dept_names": [d.name for d in hod.dept_mappings]
+        "dept_names": [d.name for d in hod.dept_mappings],
+        "profile_photo": hod.profile_photo
     }
 
 
@@ -89,6 +92,40 @@ def change_password(
     return {"message": "Password updated successfully"}
 
 
+@router.post("/upload-profile")
+def upload_profile(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role("hod")),
+    db: Session = Depends(get_db)
+):
+    import os
+    import uuid
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(400, "Invalid image format")
+    
+    os.makedirs("uploads", exist_ok=True)
+    filename = f"hod_{user['sub']}_{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join("uploads", filename)
+    
+    try:
+        content = file.file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"Could not save file: {e}")
+        
+    hod_id = int(user["sub"])
+    hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
+    if not hod:
+        raise HTTPException(404, "HOD not found")
+        
+    url_path = f"/uploads/{filename}"
+    hod.profile_photo = url_path
+    db.commit()
+    return {"profile_photo": url_path}
+
+
 def _get_hod_classes(hod_id: int, db: Session):
     hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
     if not hod:
@@ -111,6 +148,11 @@ def hod_dashboard(
     db: Session = Depends(get_db),
 ):
     hod_id = int(user["sub"])
+    cache_key = f"hod:{hod_id}:dashboard"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
     if not hod:
         raise HTTPException(404, "HOD not found")
@@ -144,12 +186,16 @@ def hod_dashboard(
             "subjects": sorted(list(set([a.subject for a in assignments] + mapped_subjects)))
         })
 
-    teachers = db.query(Teacher).order_by(Teacher.name).all()
+    teachers = db.query(Teacher).options(
+        joinedload(Teacher.dept_obj),
+        selectinload(Teacher.assignments)
+    ).order_by(Teacher.name).all()
     all_teachers = [
         {
             "teacher_id": t.teacher_id, 
             "name": t.name, 
             "phone": t.phone,
+            "email": t.email,
             "dept_name": t.dept_obj.name if t.dept_obj else None,
             "assignments": [{"subject": a.subject, "class": a.class_} for a in t.assignments if a.class_ in class_names]
         } for t in teachers
@@ -189,7 +235,7 @@ def hod_dashboard(
                             "percent": round(pct, 1)
                         })
 
-    return {
+    res = {
         "hod": {
             "hod_id": hod.hod_id, "name": hod.name, "phone": hod.phone,
             "email": hod.email, 
@@ -202,6 +248,8 @@ def hod_dashboard(
         "all_teachers": all_teachers,
         "low_attendance_alerts": alerts[:20],
     }
+    global_cache.set(cache_key, res)
+    return res
 
 
 @router.get("/classes")
@@ -210,6 +258,11 @@ def get_classes(
     db: Session = Depends(get_db),
 ):
     hod_id = int(user["sub"])
+    cache_key = f"hod:{hod_id}:classes"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     class_names = _get_hod_classes(hod_id, db)
     result = []
     for cls in class_names:
@@ -230,11 +283,12 @@ def get_classes(
             "dept_names": c_dept_names,
             "semester": hc.semester if hc else 2,
             "students": [{"student_id": s.student_id, "roll_no": s.roll_no, "name": s.name,
-                           "prn": s.prn, "semester": s.semester} for s in students],
+                           "prn": s.prn, "semester": s.semester, "subjects": [sub.name for sub in s.subjects]} for s in students],
             "assignments": [{"assignment_id": a.assignment_id, "subject": a.subject,
                               "teacher_id": a.teacher_id} for a in assignments],
             "subjects": sorted(list(set([a.subject for a in assignments] + mapped_subjects)))
         })
+    global_cache.set(cache_key, result)
     return result
 
 
@@ -347,6 +401,15 @@ def create_student(
     
     if db.query(Student).filter(Student.roll_no == payload.roll_no).first():
         raise HTTPException(400, "Student with this roll number already exists")
+        
+    if not payload.subjects:
+        raise HTTPException(400, "At least one subject is required")
+        
+    subject_objs = db.query(Subject).filter(Subject.name.in_(payload.subjects)).all()
+    if len(subject_objs) != len(payload.subjects):
+        found = {s.name for s in subject_objs}
+        missing = [x for x in payload.subjects if x not in found]
+        raise HTTPException(400, f"Subjects not found in catalog: {', '.join(missing)}")
     
     student = Student(
         roll_no=payload.roll_no,
@@ -357,7 +420,8 @@ def create_student(
         password_hash=hash_password(payload.password or "Test@123"),
         created_by_role="hod",
         created_by_id=hod_id,
-        must_change_password=True
+        must_change_password=True,
+        subjects=subject_objs
     )
     db.add(student)
     activity.log(db, "hod", hod_id, user["name"], "CREATE_STUDENT", target=payload.name, ip=request.client.host)
@@ -389,6 +453,17 @@ def update_student(
     student.semester = payload.semester
     if payload.password:
         student.password_hash = hash_password(payload.password)
+        
+    if not payload.subjects:
+        raise HTTPException(400, "At least one subject is required")
+        
+    subject_objs = db.query(Subject).filter(Subject.name.in_(payload.subjects)).all()
+    if len(subject_objs) != len(payload.subjects):
+        found = {sub.name for sub in subject_objs}
+        missing = [x for x in payload.subjects if x not in found]
+        raise HTTPException(400, f"Subjects not found in catalog: {', '.join(missing)}")
+        
+    student.subjects = subject_objs
         
     activity.log(db, "hod", hod_id, user["name"], "UPDATE_STUDENT", target=student.name, ip=request.client.host)
     db.commit()
@@ -427,14 +502,20 @@ def create_teacher(
 ):
     hod_id = int(user["sub"])
     hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
+    email_val = payload.email.lower().strip()
     
-    existing = db.query(Teacher).filter((Teacher.phone == payload.phone) | (Teacher.name == payload.name)).first()
+    existing = db.query(Teacher).filter(
+        (Teacher.phone == payload.phone) | 
+        (Teacher.email == email_val) | 
+        (Teacher.name == payload.name)
+    ).first()
     if existing:
-        raise HTTPException(400, "Teacher already exists")
+        raise HTTPException(400, "Teacher with phone, email, or name already exists")
     
     t = Teacher(
         name=payload.name.strip(),
         phone=payload.phone.strip(),
+        email=email_val,
         password_hash=hash_password(payload.password or "Teacher@123"),
         dept_id=payload.dept_id or (hod.dept_id if hod else None),
         created_by_role="hod",
@@ -467,14 +548,19 @@ def create_hod_teacher(
 ):
     hod_id = int(user["sub"])
     hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
+    email_val = payload.email.lower().strip()
     
-    # Check if teacher exists (by phone or name case-insensitive)
-    existing = db.query(Teacher).filter((Teacher.phone == payload.phone) | (func.lower(Teacher.name) == payload.name.lower().strip())).first()
+    # Check if teacher exists (by phone, email, or name case-insensitive)
+    existing = db.query(Teacher).filter(
+        (Teacher.phone == payload.phone) | 
+        (Teacher.email == email_val) | 
+        (func.lower(Teacher.name) == payload.name.lower().strip())
+    ).first()
     if existing:
-        raise HTTPException(400, f"Teacher with phone '{payload.phone}' or name '{payload.name}' already exists")
+        raise HTTPException(400, f"Teacher with phone, email, or name '{payload.name}' already exists")
     
     t = Teacher(
-        name=payload.name, phone=payload.phone,
+        name=payload.name, phone=payload.phone, email=email_val,
         dept_id=hod.dept_id,
         password_hash=hash_password(payload.password or "Teacher@123"),
         created_by_role="hod",
@@ -498,7 +584,7 @@ def create_hod_teacher(
 @router.patch("/teachers/{teacher_id}")
 def update_hod_teacher(
     teacher_id: int,
-    payload: CreateTeacherRequest,
+    payload: UpdateTeacherRequest,
     request: Request,
     user: dict = Depends(require_role("hod")),
     db: Session = Depends(get_db),
@@ -515,8 +601,14 @@ def update_hod_teacher(
         if db.query(Teacher).filter(Teacher.phone == payload.phone).first():
             raise HTTPException(400, "Phone number already in use")
 
+    email_val = payload.email.lower().strip()
+    if email_val != (teacher.email or "").lower().strip():
+        if db.query(Teacher).filter(Teacher.email == email_val).first():
+            raise HTTPException(400, "Email already in use")
+
     teacher.name = payload.name.strip()
     teacher.phone = payload.phone.strip()
+    teacher.email = email_val
     db.commit()
     return {"message": "Teacher updated"}
 
@@ -698,7 +790,31 @@ def list_hod_subjects(
     user: dict = Depends(require_role("hod")),
     db: Session = Depends(get_db),
 ):
-    subjects = db.query(Subject).distinct().order_by(Subject.name).all()
+    cache_key = "hod:subjects"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    subjects = db.query(Subject).options(
+        joinedload(Subject.dept_obj),
+        selectinload(Subject.dept_mappings),
+        selectinload(Subject.class_mappings)
+    ).order_by(Subject.name).all()
+    
+    # Cache creators to prevent N+1 queries in _get_creator_name
+    from app.models import Admin
+    admin_cache = {a.admin_id: a.name for a in db.query(Admin.admin_id, Admin.name).all()}
+    hod_cache = {h.hod_id: h.name for h in db.query(HOD.hod_id, HOD.name).all()}
+    
+    def get_cached_creator_name(role: str, actor_id: int) -> str:
+        if not role or not actor_id:
+            return "System"
+        if role == "admin":
+            return admin_cache.get(actor_id, f"Admin #{actor_id}")
+        if role == "hod":
+            return hod_cache.get(actor_id, f"HOD #{actor_id}")
+        return f"{role} #{actor_id}"
+
     result = []
     for s in subjects:
         result.append(SubjectOut(
@@ -708,8 +824,9 @@ def list_hod_subjects(
             dept_ids=[d.dept_id for d in s.dept_mappings],
             dept_names=[d.name for d in s.dept_mappings],
             assigned_classes=sorted(list(set([m.class_name for m in s.class_mappings]))),
-            created_by_name=_get_creator_name(db, s.created_by_role, s.created_by_id)
+            created_by_name=get_cached_creator_name(s.created_by_role, s.created_by_id)
         ))
+    global_cache.set(cache_key, result)
     return result
 
 
@@ -724,7 +841,7 @@ def _get_creator_name(db, role, id):
     return "System"
 
 
-@router.get("/students")
+@router.get("/students", response_model=List[StudentOut])
 def list_hod_students(
     class_: Optional[str] = Query(None),
     user: dict = Depends(require_role("hod")),
@@ -732,14 +849,26 @@ def list_hod_students(
 ):
     hod_id = int(user["sub"])
     class_names = _get_hod_classes(hod_id, db)
-    query = db.query(Student)
+    query = db.query(Student).options(selectinload(Student.subjects))
     if class_:
         if class_ not in class_names:
             raise HTTPException(403, "Class not in scope")
         query = query.filter(Student.class_ == class_)
     else:
         query = query.filter(Student.class_.in_(class_names))
-    return query.order_by(Student.roll_no).all()
+    students = query.order_by(Student.roll_no).all()
+    return [
+        StudentOut(
+            student_id=s.student_id,
+            roll_no=s.roll_no,
+            prn=s.prn,
+            name=s.name,
+            class_=s.class_,
+            semester=s.semester,
+            subjects=[sub.name for sub in s.subjects],
+        )
+        for s in students
+    ]
 
 
 @router.post("/students/import")
@@ -755,22 +884,49 @@ def import_students(
         raise HTTPException(403, "Class not in scope")
 
     added = updated = 0
-    for line in payload.data.splitlines():
-        parts = [p.strip() for p in line.split(",") if p.strip()]
-        if len(parts) < 3: continue
-        roll, prn, name = parts[0], parts[1], parts[2]
+    errors = []
+    
+    f = StringIO(payload.data)
+    reader = csv.reader(f)
+    for i, parts in enumerate(reader, 1):
+        parts = [p.strip() for p in parts]
+        if not parts or all(not p for p in parts):
+            continue
+        if len(parts) < 4:
+            errors.append(f"Line {i}: invalid format (needs roll_no, prn, name, subjects)")
+            continue
+            
+        roll, prn, name, subjects_str = parts[0], parts[1], parts[2], parts[3]
+        if not roll or not prn or not name or not subjects_str:
+            errors.append(f"Line {i}: roll_no, prn, name, and subjects are all mandatory")
+            continue
+            
+        s_temp = subjects_str.replace(";", ",").replace("|", ",")
+        subject_names = [s.strip() for s in s_temp.split(",") if s.strip()]
+        if not subject_names:
+            errors.append(f"Line {i}: subjects list is empty")
+            continue
+            
+        subject_objs = db.query(Subject).filter(Subject.name.in_(subject_names)).all()
+        if len(subject_objs) != len(subject_names):
+            found_names = {sub.name for sub in subject_objs}
+            missing = [n for n in subject_names if n not in found_names]
+            errors.append(f"Line {i}: subjects '{', '.join(missing)}' do not exist in catalog")
+            continue
+
         existing = db.query(Student).filter((Student.roll_no == roll) | (Student.prn == prn)).first()
         if existing:
             if existing.roll_no != roll and db.query(Student).filter(Student.roll_no == roll).first():
-                 # Handle roll number conflict
+                 errors.append(f"Line {i}: roll_no {roll} already exists for another student")
                  continue
-            existing.prn = prn; existing.name = name; updated += 1
+            existing.prn = prn; existing.name = name; existing.subjects = subject_objs; updated += 1
         else:
             db.add(Student(roll_no=roll, prn=prn, name=name, class_=payload.class_, semester=payload.semester,
-                           password_hash=hash_password("Test@123"), created_by_role="hod", created_by_id=hod_id))
+                           password_hash=hash_password("Test@123"), created_by_role="hod", created_by_id=hod_id,
+                           subjects=subject_objs))
             added += 1
     db.commit()
-    return {"added": added, "updated": updated}
+    return {"added": added, "updated": updated, "errors": errors}
 
 
 @router.get("/teachers/import-template")
@@ -787,8 +943,8 @@ def get_teacher_import_template():
 def get_student_import_template():
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["roll_no", "prn", "name"])
-    writer.writerow(["R01", "P01", "Student A"])
+    writer.writerow(["roll_no", "prn", "name", "subjects"])
+    writer.writerow(["R01", "P01", "Student A", "Maths, Science"])
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue().encode()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=template.csv"})
 
@@ -868,7 +1024,13 @@ def hod_report(
     mapping_rows = db.query(Subject.name).join(ClassSubject).filter(ClassSubject.class_name == class_).all()
     subjects = sorted(list(set([r[0] for r in subj_rows] + [r[0] for r in mapping_rows])))
 
-    students = db.query(Student).filter(Student.class_ == class_).all()
+    if subject:
+        students = db.query(Student).join(Student.subjects).filter(
+            Student.class_ == class_,
+            Subject.name == subject
+        ).all()
+    else:
+        students = db.query(Student).filter(Student.class_ == class_).all()
     report = []
     for s in students:
         q = db.query(Attendance).filter(
@@ -954,7 +1116,13 @@ def export_pdf(
     if class_ not in class_names:
         raise HTTPException(403, "Not your class")
     
-    students = db.query(Student).filter(Student.class_ == class_).order_by(Student.roll_no).all()
+    if subject:
+        students = db.query(Student).join(Student.subjects).filter(
+            Student.class_ == class_,
+            Subject.name == subject
+        ).order_by(Student.roll_no).all()
+    else:
+        students = db.query(Student).filter(Student.class_ == class_).order_by(Student.roll_no).all()
     rows_out = []
     for s in students:
         q = db.query(Attendance).filter(Attendance.student_id == s.student_id, Attendance.date.between(start, end))
@@ -1035,26 +1203,70 @@ async def import_students_file(
         raise HTTPException(403, "Not authorized for this class")
         
     contents = await file.read()
-    df = pd.read_csv(io.BytesIO(contents)) if file.filename.endswith('.csv') else pd.read_excel(io.BytesIO(contents))
-    
-    added = updated = 0
-    for _, row in df.iterrows():
-        roll = str(row.get('roll_no', '')).strip()
-        prn = str(row.get('prn', '')).strip()
-        name = str(row.get('name', '')).strip()
-        if not roll or not name: continue
+    try:
+        df = pd.read_csv(io.BytesIO(contents)) if file.filename.endswith('.csv') else pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(400, f"Error reading file: {str(e)}")
         
-        existing = db.query(Student).filter((Student.roll_no == roll) | (Student.prn == prn)).first()
-        if existing:
-            if existing.roll_no != roll and db.query(Student).filter(Student.roll_no == roll).first():
-                 continue
-            existing.prn = prn; existing.name = name; updated += 1
+    # Standardize column names
+    df.columns = [c.lower().strip().replace(' ', '_') for c in df.columns]
+    
+    # Required columns check
+    required = {'roll_no', 'prn', 'name', 'subjects'}
+    if not required.issubset(df.columns):
+        if len(df.columns) >= 4:
+            df.columns = ['roll_no', 'prn', 'name', 'subjects'] + list(df.columns[4:])
         else:
-            db.add(Student(roll_no=roll, prn=prn, name=name, class_=class_, semester=semester,
-                           password_hash=hash_password("Test@123"), created_by_role="hod", created_by_id=hod_id))
-            added += 1
+            raise HTTPException(400, f"File must have at least 4 columns: roll_no, prn, name, subjects. Found: {list(df.columns)}")
+            
+    added = updated = 0
+    errors = []
+    
+    for i, row in df.iterrows():
+        try:
+            roll = str(row['roll_no']).strip()
+            prn = str(row['prn']).strip()
+            name = str(row['name']).strip()
+            subjects_str = str(row['subjects']).strip()
+            
+            if not roll or roll == 'nan' or not name or name == 'nan' or not subjects_str or subjects_str == 'nan':
+                errors.append(f"Row {i+2}: Missing roll_no, name, or subjects")
+                continue
+                
+            s_temp = subjects_str.replace(";", ",").replace("|", ",")
+            subject_names = [s.strip() for s in s_temp.split(",") if s.strip()]
+            if not subject_names:
+                errors.append(f"Row {i+2}: Subjects list is empty")
+                continue
+                
+            subject_objs = db.query(Subject).filter(Subject.name.in_(subject_names)).all()
+            if len(subject_objs) != len(subject_names):
+                found_names = {sub.name for sub in subject_objs}
+                missing = [n for n in subject_names if n not in found_names]
+                errors.append(f"Row {i+2}: Subjects '{', '.join(missing)}' do not exist in catalog")
+                continue
+
+            existing = db.query(Student).filter((Student.roll_no == roll) | (Student.prn == prn)).first()
+            if existing:
+                if existing.roll_no != roll and db.query(Student).filter(Student.roll_no == roll).first():
+                     errors.append(f"Row {i+2}: roll_no {roll} already exists for another student")
+                     continue
+                existing.prn = prn
+                existing.name = name
+                existing.class_ = class_
+                existing.semester = semester
+                existing.subjects = subject_objs
+                updated += 1
+            else:
+                db.add(Student(roll_no=roll, prn=prn, name=name, class_=class_, semester=semester,
+                               password_hash=hash_password("Test@123"), created_by_role="hod", created_by_id=hod_id,
+                               subjects=subject_objs))
+                added += 1
+        except Exception as e:
+            errors.append(f"Row {i+2}: {str(e)}")
+            
     db.commit()
-    return {"added": added, "updated": updated}
+    return {"added": added, "updated": updated, "errors": errors}
 
 
 @router.post("/teachers/import-file")
@@ -1074,13 +1286,14 @@ async def import_teachers_file(
     for _, row in df.iterrows():
         name = str(row.get('name', '')).strip()
         phone = str(row.get('phone', '')).strip()
+        email = str(row.get('email', '')).strip()
         subj = str(row.get('subject', '')).strip()
         cls = str(row.get('class', '')).strip()
-        if not name or not phone: continue
+        if not name or not phone or not email or name == 'nan' or phone == 'nan' or email == 'nan': continue
         
-        t = db.query(Teacher).filter((Teacher.phone == phone) | (func.lower(Teacher.name) == name.lower())).first()
+        t = db.query(Teacher).filter((Teacher.phone == phone) | (Teacher.email == email) | (func.lower(Teacher.name) == name.lower())).first()
         if not t:
-            t = Teacher(name=name, phone=phone, password_hash=hash_password("Teacher@123"),
+            t = Teacher(name=name, phone=phone, email=email.lower().strip(), password_hash=hash_password("Teacher@123"),
                         dept_id=hod.dept_id, created_by_role="hod", created_by_id=hod_id)
             db.add(t)
             db.flush()
