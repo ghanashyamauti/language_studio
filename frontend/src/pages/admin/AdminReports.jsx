@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import Pagination from '../../components/Pagination';
 import { FileDown, Search, AlertTriangle, Filter, Key, X, Building2, GraduationCap, BookOpen, Users } from 'lucide-react';
@@ -361,7 +362,7 @@ export default function AdminReports() {
       )}
 
       {/* Reset Password Modal */}
-      {resetPassword && (
+      {resetPassword && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <div className="flex items-center justify-between mb-4">
@@ -374,7 +375,8 @@ export default function AdminReports() {
               <button type="submit" className="btn-primary w-full">Update Password</button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

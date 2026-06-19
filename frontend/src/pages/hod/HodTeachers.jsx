@@ -5,6 +5,38 @@ import { Shield, Plus, X, Phone, User, Search, Trash2, Pencil, BookOpen, Chevron
 import toast from 'react-hot-toast';
 import BulkImportModal from '../../components/admin/BulkImportModal';
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
+
+function UserAvatar({ src, name, className, fallbackClassName, fallbackIcon: FallbackIcon }) {
+  const [hasError, setHasError] = useState(false);
+  
+  if (src && !hasError) {
+    return (
+      <img 
+        src={src} 
+        alt={name} 
+        className={className} 
+        onError={() => setHasError(true)} 
+      />
+    );
+  }
+  
+  return (
+    <div className={fallbackClassName}>
+      {FallbackIcon ? <FallbackIcon size={22} /> : (name?.[0]?.toUpperCase() || '?')}
+    </div>
+  );
+}
+
+
 export default function HodTeachers() {
   const [teachers, setTeachers] = useState([]);
   const [classList, setClassList] = useState([]);
@@ -213,9 +245,12 @@ export default function HodTeachers() {
         {filtered.map(t => (
           <div key={t.teacher_id} className="card group hover:shadow-md transition-shadow p-5 border-l-4 border-purple-500 relative">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform">
-                <User size={24}/>
-              </div>
+              <UserAvatar 
+                src={t.profile_photo ? getImageUrl(t.profile_photo) : null}
+                name={t.name}
+                className="w-12 h-12 rounded-full object-cover shadow-inner group-hover:scale-110 transition-transform"
+                fallbackClassName="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform font-black text-lg"
+              />
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-jspm-navy truncate">{t.name}</h3>
                 <div className="flex items-center gap-1.5 text-gray-500 text-xs mt-1 flex-wrap">

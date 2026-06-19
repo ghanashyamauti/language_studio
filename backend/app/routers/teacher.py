@@ -375,27 +375,19 @@ def upload_profile(
 ):
     import os
     import uuid
+    from app.s3_utils import upload_file_to_s3
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
         raise HTTPException(400, "Invalid image format")
     
-    os.makedirs("uploads", exist_ok=True)
     filename = f"teacher_{user['sub']}_{uuid.uuid4().hex}{ext}"
-    filepath = os.path.join("uploads", filename)
-    
-    try:
-        content = file.file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
-    except Exception as e:
-        raise HTTPException(500, f"Could not save file: {e}")
+    url_path = upload_file_to_s3(file, filename, file.content_type)
         
     teacher_id = int(user["sub"])
     teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
     if not teacher:
         raise HTTPException(404, "Teacher not found")
         
-    url_path = f"/uploads/{filename}"
     teacher.profile_photo = url_path
     db.commit()
     return {"profile_photo": url_path}

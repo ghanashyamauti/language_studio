@@ -5,6 +5,35 @@ import { Users, Plus, X, Search, GraduationCap, Phone, Hash, Trash2, Lock, Chevr
 import toast from 'react-hot-toast';
 import BulkImportModal from '../../components/admin/BulkImportModal';
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
+
+function StudentAvatar({ src, name }) {
+  const [hasError, setHasError] = useState(false);
+  if (src && !hasError) {
+    return (
+      <img 
+        src={getImageUrl(src)} 
+        alt={name} 
+        className="w-12 h-12 rounded-full object-cover shadow-inner group-hover:scale-110 transition-transform flex-shrink-0"
+        onError={() => setHasError(true)} 
+      />
+    );
+  }
+  return (
+    <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform flex-shrink-0">
+      <GraduationCap size={24}/>
+    </div>
+  );
+}
+
 export default function HodStudents() {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -200,9 +229,7 @@ export default function HodStudents() {
         {filtered.map(s => (
           <div key={s.student_id} className="card hover:shadow-md transition-shadow p-5 border-l-4 border-emerald-500 relative group">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-                <GraduationCap size={24}/>
-              </div>
+              <StudentAvatar src={s.profile_photo} name={s.name} />
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-jspm-navy truncate">{s.name}</h3>
                 <div className="text-xs text-gray-500 mt-1 flex flex-col gap-1">

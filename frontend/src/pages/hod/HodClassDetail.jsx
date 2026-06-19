@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { ArrowLeft, Users, BookOpen, Trash2, UserPlus, Upload, X, Download, KeyRound, Table, FileText, AlertTriangle } from 'lucide-react';
@@ -322,8 +323,8 @@ export default function HodClassDetail() {
       )}
 
       {/* Delete student confirm */}
-      {deleteStudent && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      {deleteStudent && createPortal(
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center">
             <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3"><Trash2 size={20} className="text-red-500"/></div>
             <h3 className="font-bold text-jspm-navy mb-1">Remove Student?</h3>
@@ -334,12 +335,13 @@ export default function HodClassDetail() {
               <button onClick={handleRemoveStudent} className="btn-danger flex-1">Remove</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Import Modal */}
-      {importModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      {importModal && createPortal(
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-jspm-navy">Import Students for {className}</h3>
@@ -391,12 +393,13 @@ export default function HodClassDetail() {
               <button onClick={handleImport} className="btn-primary flex-1"><Upload size={14}/> Import</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Reset Password Modal */}
-      {resetPassword && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      {resetPassword && createPortal(
+        <div className="fixed inset-0 bg-black/40 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-bold text-xl text-jspm-blue">Change Student Password</h2>
@@ -415,11 +418,12 @@ export default function HodClassDetail() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Create Student Modal */}
-      {createStudentModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      {createStudentModal && createPortal(
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-jspm-navy">Add Individual Student</h3>
@@ -476,7 +480,8 @@ export default function HodClassDetail() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

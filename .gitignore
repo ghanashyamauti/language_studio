@@ -33,3 +33,7 @@ pip-log.txt
 *.sw?
 .DS_Store
 Thumbs.db
+
+# Local uploads
+backend/uploads/
+

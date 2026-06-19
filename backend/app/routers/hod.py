@@ -100,27 +100,19 @@ def upload_profile(
 ):
     import os
     import uuid
+    from app.s3_utils import upload_file_to_s3
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
         raise HTTPException(400, "Invalid image format")
     
-    os.makedirs("uploads", exist_ok=True)
     filename = f"hod_{user['sub']}_{uuid.uuid4().hex}{ext}"
-    filepath = os.path.join("uploads", filename)
-    
-    try:
-        content = file.file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
-    except Exception as e:
-        raise HTTPException(500, f"Could not save file: {e}")
+    url_path = upload_file_to_s3(file, filename, file.content_type)
         
     hod_id = int(user["sub"])
     hod = db.query(HOD).filter(HOD.hod_id == hod_id).first()
     if not hod:
         raise HTTPException(404, "HOD not found")
         
-    url_path = f"/uploads/{filename}"
     hod.profile_photo = url_path
     db.commit()
     return {"profile_photo": url_path}
@@ -197,7 +189,8 @@ def hod_dashboard(
             "phone": t.phone,
             "email": t.email,
             "dept_name": t.dept_obj.name if t.dept_obj else None,
-            "assignments": [{"subject": a.subject, "class": a.class_} for a in t.assignments if a.class_ in class_names]
+            "assignments": [{"subject": a.subject, "class": a.class_} for a in t.assignments if a.class_ in class_names],
+            "profile_photo": t.profile_photo
         } for t in teachers
     ]
 
@@ -865,6 +858,7 @@ def list_hod_students(
             name=s.name,
             class_=s.class_,
             semester=s.semester,
+            profile_photo=s.profile_photo,
             subjects=[sub.name for sub in s.subjects],
         )
         for s in students

@@ -4,6 +4,38 @@ import api from '../../api/client';
 import { Plus, Trash2, Pencil, Users, X, Key, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
+
+function UserAvatar({ src, name, className, fallbackClassName, fallbackIcon: FallbackIcon }) {
+  const [hasError, setHasError] = useState(false);
+  
+  if (src && !hasError) {
+    return (
+      <img 
+        src={src} 
+        alt={name} 
+        className={className} 
+        onError={() => setHasError(true)} 
+      />
+    );
+  }
+  
+  return (
+    <div className={fallbackClassName}>
+      {FallbackIcon ? <FallbackIcon size={22} /> : (name?.[0]?.toUpperCase() || '?')}
+    </div>
+  );
+}
+
+
 function HODForm({ initial, departments, onSave, onCancel }) {
   const [form, setForm] = useState(
     initial
@@ -275,9 +307,13 @@ export default function AdminHODs() {
             <div key={h.hod_id} className="card group hover:border-jspm-blue transition-all">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
-                    <Users size={22} />
-                  </div>
+                  <UserAvatar 
+                    src={h.profile_photo ? getImageUrl(h.profile_photo) : null}
+                    name={h.name}
+                    className="w-12 h-12 rounded-2xl object-cover shadow-inner group-hover:scale-110 transition-transform"
+                    fallbackClassName="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform font-black"
+                    fallbackIcon={Users}
+                  />
                   <div>
                     <p className="font-bold text-lg text-jspm-navy leading-tight">{h.name}</p>
                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">

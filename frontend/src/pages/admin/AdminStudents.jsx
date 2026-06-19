@@ -5,6 +5,35 @@ import { Users, Plus, X, Search, GraduationCap, Hash, Trash2, Pencil, Lock, Buil
 import toast from 'react-hot-toast';
 import BulkImportModal from '../../components/admin/BulkImportModal';
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
+
+function StudentAvatar({ src, name }) {
+  const [hasError, setHasError] = useState(false);
+  if (src && !hasError) {
+    return (
+      <img 
+        src={getImageUrl(src)} 
+        alt={name} 
+        className="w-12 h-12 rounded-2xl object-cover shadow-inner group-hover:scale-110 transition-transform flex-shrink-0"
+        onError={() => setHasError(true)} 
+      />
+    );
+  }
+  return (
+    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform flex-shrink-0">
+      <GraduationCap size={24}/>
+    </div>
+  );
+}
+
 export default function AdminStudents() {
   const [students, setStudents] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -271,9 +300,7 @@ export default function AdminStudents() {
             <div key={s.student_id} className="card group hover:border-jspm-blue transition-all border-l-4 border-emerald-500 flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform flex-shrink-0">
-                    <GraduationCap size={24}/>
-                  </div>
+                  <StudentAvatar src={s.profile_photo} name={s.name} />
                   <div className="min-w-0 flex-1">
                     <h3 className="font-bold text-jspm-navy text-lg truncate leading-tight" title={s.name}>{s.name}</h3>
                     <div className="flex items-center gap-2 mt-1">

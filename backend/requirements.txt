@@ -11,3 +11,4 @@ pandas
 openpyxl
 jinja2
 watchfiles
+boto3

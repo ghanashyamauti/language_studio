@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ZoomIn, ZoomOut, Move } from 'lucide-react';
 
 export default function ImageCropperModal({
@@ -152,7 +153,7 @@ export default function ImageCropperModal({
     }, 'image/jpeg', 0.85);
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col">
         {/* Header */}
@@ -190,6 +191,7 @@ export default function ImageCropperModal({
                 cursor: isDragging ? 'grabbing' : 'grab',
                 maxWidth: 'none',
                 maxHeight: 'none',
+                margin: 0,
               }}
             />
 
@@ -267,6 +269,7 @@ export default function ImageCropperModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

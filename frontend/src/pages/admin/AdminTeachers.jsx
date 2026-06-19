@@ -5,6 +5,38 @@ import { Plus, Trash2, Pencil, X, Shield, Key, BookOpen, GraduationCap, Building
 import toast from 'react-hot-toast';
 import BulkImportModal from '../../components/admin/BulkImportModal';
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/uploads/')) {
+    const base = api.defaults.baseURL || '';
+    return `${base}${url}`;
+  }
+  return url;
+};
+
+function UserAvatar({ src, name, className, fallbackClassName, fallbackIcon: FallbackIcon }) {
+  const [hasError, setHasError] = useState(false);
+  
+  if (src && !hasError) {
+    return (
+      <img 
+        src={src} 
+        alt={name} 
+        className={className} 
+        onError={() => setHasError(true)} 
+      />
+    );
+  }
+  
+  return (
+    <div className={fallbackClassName}>
+      {FallbackIcon ? <FallbackIcon size={22} /> : (name?.[0]?.toUpperCase() || '?')}
+    </div>
+  );
+}
+
+
 export default function AdminTeachers() {
   const [teachers, setTeachers] = useState([]);
   const [subjectList, setSubjectList] = useState([]);
@@ -163,9 +195,12 @@ export default function AdminTeachers() {
           <div key={t.teacher_id} className="card group hover:border-jspm-blue transition-all">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform font-black">
-                  {t.name[0]}
-                </div>
+                <UserAvatar 
+                  src={t.profile_photo ? getImageUrl(t.profile_photo) : null}
+                  name={t.name}
+                  className="w-12 h-12 rounded-2xl object-cover shadow-inner group-hover:scale-110 transition-transform"
+                  fallbackClassName="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform font-black"
+                />
                 <div>
                   <h3 className="font-bold text-jspm-navy text-lg leading-tight">{t.name}</h3>
                   <div className="text-xs text-gray-400 mt-1 space-y-0.5">

@@ -30,6 +30,7 @@ class StudentOut(BaseModel):
     class_: str
     semester: int
     created_by_name: Optional[str] = None
+    profile_photo: Optional[str] = None
     subjects: List[str] = []
     model_config = {"from_attributes": True}
 
@@ -158,6 +159,7 @@ class HODOut(BaseModel):
     dept_names: List[str] = []
     created_at: Optional[datetime]
     classes: List[str] = []
+    profile_photo: Optional[str] = None
     model_config = {"from_attributes": True}
 
 class TeacherOut(BaseModel):
@@ -169,6 +171,7 @@ class TeacherOut(BaseModel):
     dept_name: Optional[str] = None
     assignments: List[dict] = []
     created_by_name: Optional[str] = None
+    profile_photo: Optional[str] = None
     model_config = {"from_attributes": True}
 
 class ActivityLogOut(BaseModel):

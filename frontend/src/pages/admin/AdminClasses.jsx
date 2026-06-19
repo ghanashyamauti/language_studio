@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import { Plus, Building2, GraduationCap, X, Edit2, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -32,7 +33,7 @@ function ClassModal({ hods, subjects, departments, onSave, onCancel, editData = 
     );
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
@@ -106,7 +107,8 @@ function ClassModal({ hods, subjects, departments, onSave, onCancel, editData = 
           <button type="button" onClick={onCancel} className="btn-secondary flex-1">Cancel</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

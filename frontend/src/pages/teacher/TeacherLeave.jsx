@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 import { Calendar, AlertCircle, Plus, Trash2, Clock, CheckCircle, XCircle } from 'lucide-react';
@@ -215,7 +216,7 @@ export default function TeacherLeave() {
       </div>
 
       {/* Apply Modal */}
-      {showApplyModal && (
+      {showApplyModal && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-100 animate-scaleUp">
             <h3 className="text-lg font-bold text-slate-900 mb-4">Apply for Leave</h3>
@@ -288,7 +289,8 @@ export default function TeacherLeave() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

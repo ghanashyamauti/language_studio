@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import toast from 'react-hot-toast';
-import { Lock, User, ChevronDown } from 'lucide-react';
+import { Lock, User, ChevronDown, Eye, EyeOff } from 'lucide-react';
 
 const ROLES = [
   { value: 'admin', label: 'Admin', color: 'bg-indigo-600 text-white' },
@@ -28,6 +28,7 @@ export default function LoginPage() {
   const [role, setRole] = useState('student');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
   const [settings, setSettings] = useState(null);
@@ -113,16 +114,24 @@ export default function LoginPage() {
                   required
                 />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 relative">
                 <input
-                  type="password"
-                  className="w-full bg-white text-gray-900 placeholder-gray-500 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-sm"
+                  type={showPassword ? 'text' : 'password'}
+                  className="w-full bg-white text-gray-900 placeholder-gray-500 rounded-lg py-2.5 pl-3 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-sm"
                   placeholder="Password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   autoComplete="current-password"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-500 hover:text-slate-700 transition-colors focus:outline-none"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 

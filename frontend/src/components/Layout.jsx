@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -28,11 +29,11 @@ const navConfig = {
     { to: '/admin/classes', icon: GraduationCap, label: 'Classes' },
     { to: '/admin/students', icon: Users, label: 'Students' },
     { to: '/admin/subjects', icon: BookOpen, label: 'Subjects' },
-    { to: '/admin/leave-approvals', icon: ClipboardList, label: 'Leave Approvals' },
+    {to: '/admin/leave-approvals', icon: ClipboardList, label: 'Leave Approvals' },
+    { to: '/admin/staff-attendance', icon: Clock, label: 'Staff & Lectures' },
     { to: '/admin/reports', icon: ClipboardList, label: 'Reports' },
     { to: '/admin/analytics', icon: BarChart2, label: 'Analytics' },
     { to: '/admin/bulk-correction', icon: PenSquare, label: 'Bulk Correction' },
-    { to: '/admin/staff-attendance', icon: Clock, label: 'Staff Attendance' },
     { to: '/admin/holidays', icon: Calendar, label: 'Holidays' },
     { to: '/admin/notifications', icon: Bell, label: 'Notifications' },
     { to: '/admin/activity-logs', icon: Activity, label: 'Activity Logs' },
@@ -102,13 +103,13 @@ export default function Layout() {
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed md:relative z-50 h-full w-64 bg-gradient-to-b ${roleColors[role]} text-white flex flex-col shadow-2xl transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      <aside className={`fixed md:relative z-40 h-full w-64 bg-gradient-to-b ${roleColors[role]} text-white flex flex-col shadow-2xl transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         {/* Logo */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <div className="flex items-center gap-2">
@@ -183,7 +184,7 @@ export default function Layout() {
       <main className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Top Header for mobile toggle */}
         {!(role === 'admin' || role === 'hod') ? (
-          <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 shadow-sm z-10">
+          <header className="relative flex md:hidden h-16 bg-white border-b border-gray-100 items-center justify-between px-6 shadow-sm">
             <div className="flex items-center gap-4">
               <button className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg" onClick={() => setSidebarOpen(true)}>
                 <Menu size={20} />
@@ -194,20 +195,20 @@ export default function Layout() {
             </div>
           </header>
         ) : (
-          <header className="md:hidden h-16 bg-white border-b border-gray-100 flex items-center px-6 shadow-sm z-10">
+          <header className="relative flex md:hidden h-16 bg-white border-b border-gray-100 items-center px-6 shadow-sm">
             <button className="p-2 -ml-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg" onClick={() => setSidebarOpen(true)}>
               <Menu size={20} />
             </button>
           </header>
         )}
 
-        <div className="flex-1 overflow-auto bg-jspm-bg">
+        <div className={`flex-1 overflow-y-auto overflow-x-hidden bg-jspm-bg main-content-area ${sidebarOpen ? 'max-md:overflow-hidden' : ''}`}>
           <div className="max-w-7xl mx-auto px-6 py-6">
             <Outlet />
           </div>
         </div>
       </main>
-      {showLogoutConfirm && (
+      {showLogoutConfirm && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 animate-scaleUp">
             <h3 className="text-lg font-bold text-slate-900">Sign Out</h3>
@@ -231,7 +232,8 @@ export default function Layout() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

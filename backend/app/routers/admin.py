@@ -130,22 +130,14 @@ def upload_logo(
 ):
     import os
     import uuid
+    from app.s3_utils import upload_file_to_s3
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
         raise HTTPException(400, "Invalid image format")
     
-    os.makedirs("uploads", exist_ok=True)
     filename = f"logo_{uuid.uuid4().hex}{ext}"
-    filepath = os.path.join("uploads", filename)
-    
-    try:
-        content = file.file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
-    except Exception as e:
-        raise HTTPException(500, f"Could not save file: {e}")
+    url_path = upload_file_to_s3(file, filename, file.content_type)
         
-    url_path = f"/uploads/{filename}"
     s = _get_settings(db)
     s.logo_url = url_path
     db.commit()
@@ -189,7 +181,7 @@ def list_students(
     user: dict = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Student)
+    q = db.query(Student).options(selectinload(Student.subjects))
     
     if dept_id:
         dept_classes = db.query(HodClass.class_name).filter(HodClass.dept_id == dept_id).all()
@@ -225,7 +217,9 @@ def list_students(
             name=s.name,
             class_=s.class_,
             semester=s.semester,
-            created_by_name=get_cached_creator_name(s.created_by_role, s.created_by_id)
+            created_by_name=get_cached_creator_name(s.created_by_role, s.created_by_id),
+            profile_photo=s.profile_photo,
+            subjects=[sub.name for sub in s.subjects]
         ) for s in students
     ]
 
@@ -754,7 +748,8 @@ def list_hods(user: dict = Depends(require_role("admin")), db: Session = Depends
             dept_ids=[d.dept_id for d in h.dept_mappings],
             dept_names=[d.name for d in h.dept_mappings],
             classes=[hc.class_name for hc in h.hod_classes],
-            created_at=h.created_at
+            created_at=h.created_at,
+            profile_photo=h.profile_photo
         ) for h in hods
     ]
     global_cache.set(cache_key, res)
@@ -1151,7 +1146,8 @@ def list_teachers(user: dict = Depends(require_role("admin")), db: Session = Dep
             dept_id=t.dept_id,
             dept_name=t.dept_obj.name if t.dept_obj else None,
             assignments=[{"id": a.assignment_id, "subject": a.subject, "class": a.class_} for a in t.assignments],
-            created_by_name=get_cached_creator_name(t.created_by_role, t.created_by_id)
+            created_by_name=get_cached_creator_name(t.created_by_role, t.created_by_id),
+            profile_photo=t.profile_photo
         ) for t in teachers
     ]
     global_cache.set(cache_key, res)
