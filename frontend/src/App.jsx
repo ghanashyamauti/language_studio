@@ -23,6 +23,8 @@ import AdminDepartments from './pages/admin/AdminDepartments';
 import AdminBulkCorrection from './pages/admin/AdminBulkCorrection';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminPassword from './pages/admin/AdminPassword';
+import AdminLeaveApprovals from './pages/admin/AdminLeaveApprovals';
+import AdminStaffAttendance from './pages/admin/AdminStaffAttendance';
 
 // HOD
 import HodDashboard from './pages/hod/HodDashboard';
@@ -35,6 +37,10 @@ import HodTeachers from './pages/hod/HodTeachers';
 import HodStudents from './pages/hod/HodStudents';
 import HodSubjects from './pages/hod/HodSubjects';
 import HodReports from './pages/hod/HodReports';
+import HodLeaveApprovals from './pages/hod/HodLeaveApprovals';
+import HodLeave from './pages/hod/HodLeave';
+import HodFaceAttendance from './pages/hod/HodFaceAttendance';
+import HodStaffAttendance from './pages/hod/HodStaffAttendance';
 
 // Teacher
 import TeacherSelect from './pages/teacher/TeacherSelect';
@@ -42,6 +48,8 @@ import TeacherMark from './pages/teacher/TeacherMark';
 import TeacherReport from './pages/teacher/TeacherReport';
 import TeacherSettings from './pages/teacher/TeacherSettings';
 import TeacherPerformance from './pages/teacher/TeacherPerformance';
+import TeacherLeave from './pages/teacher/TeacherLeave';
+import TeacherFaceAttendance from './pages/teacher/TeacherFaceAttendance';
 
 // Student
 import StudentDashboard from './pages/student/StudentDashboard';
@@ -76,6 +84,8 @@ export default function App() {
             <Route path="departments" element={<AdminDepartments />} />
             <Route path="activity-logs" element={<AdminActivityLogs />} />
             <Route path="settings" element={<AdminSettings />} />
+            <Route path="leave-approvals" element={<AdminLeaveApprovals />} />
+            <Route path="staff-attendance" element={<AdminStaffAttendance />} />
             <Route path="password" element={<AdminPassword />} />
           </Route>
 
@@ -90,6 +100,10 @@ export default function App() {
             <Route path="subjects" element={<HodSubjects />} />
             <Route path="reports" element={<HodReports />} />
             <Route path="analytics" element={<HodAnalytics />} />
+            <Route path="leave" element={<HodLeave />} />
+            <Route path="face-attendance" element={<HodFaceAttendance />} />
+            <Route path="leave-approvals" element={<HodLeaveApprovals />} />
+            <Route path="staff-attendance" element={<HodStaffAttendance />} />
             <Route path="settings" element={<HodSettings />} />
             <Route path="password" element={<HodPassword />} />
           </Route>
@@ -101,6 +115,8 @@ export default function App() {
             <Route path="mark" element={<TeacherMark />} />
             <Route path="report" element={<TeacherReport />} />
             <Route path="performance" element={<TeacherPerformance />} />
+            <Route path="leave" element={<TeacherLeave />} />
+            <Route path="face-attendance" element={<TeacherFaceAttendance />} />
             <Route path="settings" element={<TeacherSettings />} />
           </Route>
 

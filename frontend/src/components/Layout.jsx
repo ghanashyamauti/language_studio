@@ -15,7 +15,8 @@ const getImageUrl = (url) => {
 import {
   LayoutDashboard, Users, BookOpen, ClipboardList, LogOut, Upload, Layers,
   FileText, Activity, ChevronRight, BarChart2, Bell, Calendar, GraduationCap,
-  Settings, Shield, UserPlus, PenSquare, TrendingUp, Clock, Lock, Home, Menu, X
+  Settings, Shield, UserPlus, PenSquare, TrendingUp, Clock, Lock, Home, Menu, X,
+  Camera
 } from 'lucide-react';
 
 const navConfig = {
@@ -27,9 +28,11 @@ const navConfig = {
     { to: '/admin/classes', icon: GraduationCap, label: 'Classes' },
     { to: '/admin/students', icon: Users, label: 'Students' },
     { to: '/admin/subjects', icon: BookOpen, label: 'Subjects' },
+    { to: '/admin/leave-approvals', icon: ClipboardList, label: 'Leave Approvals' },
     { to: '/admin/reports', icon: ClipboardList, label: 'Reports' },
     { to: '/admin/analytics', icon: BarChart2, label: 'Analytics' },
     { to: '/admin/bulk-correction', icon: PenSquare, label: 'Bulk Correction' },
+    { to: '/admin/staff-attendance', icon: Clock, label: 'Staff Attendance' },
     { to: '/admin/holidays', icon: Calendar, label: 'Holidays' },
     { to: '/admin/notifications', icon: Bell, label: 'Notifications' },
     { to: '/admin/activity-logs', icon: Activity, label: 'Activity Logs' },
@@ -38,6 +41,10 @@ const navConfig = {
   hod: [
     { to: '/hod/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/hod/analytics', icon: TrendingUp, label: 'Analytics' },
+    { to: '/hod/face-attendance', icon: Camera, label: 'Face Attendance' },
+    { to: '/hod/leave', icon: Calendar, label: 'Leave Application' },
+    { to: '/hod/leave-approvals', icon: ClipboardList, label: 'Leave Approvals' },
+    { to: '/hod/staff-attendance', icon: Clock, label: 'Staff & Lectures' },
     { to: '/hod/teachers', icon: Shield, label: 'Teachers' },
     { to: '/hod/students', icon: GraduationCap, label: 'Students' },
     { to: '/hod/subjects', icon: BookOpen, label: 'Subjects' },
@@ -46,6 +53,8 @@ const navConfig = {
   ],
   teacher: [
     { to: '/teacher/select', icon: PenSquare, label: 'Mark Attendance' },
+    { to: '/teacher/face-attendance', icon: Camera, label: 'Face Attendance' },
+    { to: '/teacher/leave', icon: Calendar, label: 'Leave Application' },
     { to: '/teacher/report', icon: FileText, label: 'Report' },
     { to: '/teacher/performance', icon: TrendingUp, label: 'My Performance' },
     { to: '/teacher/settings', icon: Settings, label: 'Settings' },
@@ -173,16 +182,24 @@ export default function Layout() {
       {/* Main content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Top Header for mobile toggle */}
-        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 shadow-sm z-10">
-          <div className="flex items-center gap-4">
-            <button className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg" onClick={() => setSidebarOpen(true)}>
+        {!(role === 'admin' || role === 'hod') ? (
+          <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 shadow-sm z-10">
+            <div className="flex items-center gap-4">
+              <button className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg" onClick={() => setSidebarOpen(true)}>
+                <Menu size={20} />
+              </button>
+              <div className="hidden sm:flex items-center gap-2 text-sm text-gray-500 font-medium">
+                <span>Language Craft Studio Attendance</span>
+              </div>
+            </div>
+          </header>
+        ) : (
+          <header className="md:hidden h-16 bg-white border-b border-gray-100 flex items-center px-6 shadow-sm z-10">
+            <button className="p-2 -ml-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg" onClick={() => setSidebarOpen(true)}>
               <Menu size={20} />
             </button>
-            <div className="hidden sm:flex items-center gap-2 text-sm text-gray-500 font-medium">
-              <span>Language Craft Studio Attendance</span>
-            </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         <div className="flex-1 overflow-auto bg-jspm-bg">
           <div className="max-w-7xl mx-auto px-6 py-6">

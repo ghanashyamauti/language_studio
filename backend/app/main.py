@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from passlib.hash import pbkdf2_sha256
 from app.database import engine, Base, SessionLocal
 from app.models import *  # ensure all models are registered
-from app.routers import admin, hod, teacher, student, auth
+from app.routers import admin, hod, teacher, student, auth, leave
 
 
 app = FastAPI(title="Language Craft Studio Attendance API", version="2.0")
@@ -74,6 +74,7 @@ app.include_router(admin.router)
 app.include_router(hod.router)
 app.include_router(teacher.router)
 app.include_router(student.router)
+app.include_router(leave.router)
 
 # ── Startup cache warmup ──────────────────────────────────────────────────────
 import threading

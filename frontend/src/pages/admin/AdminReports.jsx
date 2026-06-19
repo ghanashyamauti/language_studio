@@ -38,11 +38,21 @@ export default function AdminReports() {
   }, []);
 
   // When department changes → filter classes
+  // A class may belong to multiple departments via dept_ids[]; check all of them.
   useEffect(() => {
     if (!filters.dept_id) {
       setFilteredClasses([]);
     } else {
-      setFilteredClasses(allClasses.filter(c => String(c.dept_id) === String(filters.dept_id) || String(c.dept_name) === String(departments.find(d => String(d.dept_id) === String(filters.dept_id))?.name)));
+      const deptIdStr = String(filters.dept_id);
+      setFilteredClasses(
+        allClasses.filter(c => {
+          // 1. Primary dept_id match
+          if (String(c.dept_id) === deptIdStr) return true;
+          // 2. Multi-department membership array (dept_ids)
+          if (Array.isArray(c.dept_ids) && c.dept_ids.some(id => String(id) === deptIdStr)) return true;
+          return false;
+        })
+      );
     }
     setFilters(f => ({ ...f, class_: '', subject: '' }));
     setFilteredSubjects([]);

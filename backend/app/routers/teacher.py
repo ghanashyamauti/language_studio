@@ -399,3 +399,155 @@ def upload_profile(
     teacher.profile_photo = url_path
     db.commit()
     return {"profile_photo": url_path}
+
+
+# ── Face Detection Attendance ─────────────────────────────────────────────────
+import json
+import math
+
+@router.post("/face-register")
+def face_register(
+    payload: dict,
+    user: dict = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    """Register or update face descriptor for a teacher."""
+    from app.models import StaffFaceData
+    teacher_id = int(user["sub"])
+    descriptor = payload.get("face_descriptor")
+
+    if not descriptor or not isinstance(descriptor, list) or len(descriptor) < 64:
+        raise HTTPException(400, "Invalid face descriptor")
+
+    existing = db.query(StaffFaceData).filter(
+        StaffFaceData.role == "teacher",
+        StaffFaceData.user_id == teacher_id,
+    ).first()
+
+    if existing:
+        existing.face_descriptor = json.dumps(descriptor)
+        existing.registered_at = datetime.utcnow()
+    else:
+        db.add(StaffFaceData(
+            role="teacher",
+            user_id=teacher_id,
+            face_descriptor=json.dumps(descriptor),
+        ))
+    db.commit()
+    return {"message": "Face registered successfully"}
+
+
+@router.get("/face-status")
+def face_status(
+    user: dict = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    """Check if a teacher has registered their face."""
+    from app.models import StaffFaceData
+    teacher_id = int(user["sub"])
+    existing = db.query(StaffFaceData).filter(
+        StaffFaceData.role == "teacher",
+        StaffFaceData.user_id == teacher_id,
+    ).first()
+    return {"registered": existing is not None, "registered_at": existing.registered_at if existing else None}
+
+
+def _euclidean_distance(a: list, b: list) -> float:
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+
+@router.post("/face-attendance")
+def face_attendance(
+    payload: dict,
+    user: dict = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    """Mark attendance via face detection. Blocks if on approved leave."""
+    from app.models import StaffFaceData, StaffAttendance, StaffLeave
+    teacher_id = int(user["sub"])
+    descriptor = payload.get("face_descriptor")
+
+    if not descriptor or not isinstance(descriptor, list):
+        raise HTTPException(400, "Invalid face descriptor")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_time = datetime.now().strftime("%I:%M %p")
+
+    # Check if on approved leave today
+    on_leave = db.query(StaffLeave).filter(
+        StaffLeave.applicant_role == "teacher",
+        StaffLeave.applicant_id == teacher_id,
+        StaffLeave.status == "approved",
+        StaffLeave.start_date <= today,
+        StaffLeave.end_date >= today,
+    ).first()
+    if on_leave:
+        raise HTTPException(400, f"You are on approved {on_leave.leave_type} today. Cannot mark attendance.")
+
+    # Check if already marked today
+    existing = db.query(StaffAttendance).filter(
+        StaffAttendance.role == "teacher",
+        StaffAttendance.user_id == teacher_id,
+        StaffAttendance.date == today,
+    ).first()
+    if existing:
+        raise HTTPException(400, "Attendance already marked for today")
+
+    # Load stored face descriptor
+    face_data = db.query(StaffFaceData).filter(
+        StaffFaceData.role == "teacher",
+        StaffFaceData.user_id == teacher_id,
+    ).first()
+    if not face_data:
+        raise HTTPException(400, "Face not registered. Please register your face first.")
+
+    stored = json.loads(face_data.face_descriptor)
+    distance = _euclidean_distance(stored, descriptor)
+
+    if distance > 0.6:
+        raise HTTPException(400, f"Face not recognized. Please try again in better lighting.")
+
+    # Mark attendance
+    record = StaffAttendance(
+        role="teacher",
+        user_id=teacher_id,
+        date=today,
+        check_in_time=now_time,
+        status="Present",
+        verified_by="face_detection",
+    )
+    db.add(record)
+    db.commit()
+    return {"message": "Attendance marked successfully", "time": now_time, "date": today}
+
+
+@router.get("/my-attendance")
+def my_attendance(
+    page: int = Query(1, ge=1),
+    limit: int = Query(30, ge=1, le=100),
+    user: dict = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    """View own attendance history."""
+    from app.models import StaffAttendance
+    teacher_id = int(user["sub"])
+
+    q = db.query(StaffAttendance).filter(
+        StaffAttendance.role == "teacher",
+        StaffAttendance.user_id == teacher_id,
+    )
+    total = q.count()
+    records = q.order_by(StaffAttendance.date.desc()).offset((page - 1) * limit).limit(limit).all()
+
+    return {
+        "records": [
+            {
+                "id": r.id, "date": r.date, "check_in_time": r.check_in_time,
+                "status": r.status, "verified_by": r.verified_by,
+            } for r in records
+        ],
+        "total": total,
+        "page": page,
+        "total_pages": (total + limit - 1) // limit if total > 0 else 1,
+    }
+

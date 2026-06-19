@@ -363,3 +363,52 @@ class SubjectOut(BaseModel):
     assigned_classes: List[str] = []
     created_by_name: Optional[str] = None
     model_config = {"from_attributes": True}
+
+
+# ── Leave Management ─────────────────────────────────────────────────────────
+class LeaveApplyRequest(BaseModel):
+    leave_type: str       # Casual Leave, Sick Leave, Personal Leave, Other
+    start_date: str       # YYYY-MM-DD
+    end_date: str         # YYYY-MM-DD
+    reason: str
+
+class LeaveReviewRequest(BaseModel):
+    status: str           # approved or rejected
+    comment: Optional[str] = None
+
+class LeaveOut(BaseModel):
+    leave_id: int
+    applicant_role: str
+    applicant_id: int
+    applicant_name: Optional[str] = None
+    leave_type: str
+    start_date: str
+    end_date: str
+    reason: str
+    status: str
+    reviewed_by_role: Optional[str] = None
+    reviewed_by_name: Optional[str] = None
+    review_comment: Optional[str] = None
+    created_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
+# ── Face Detection Attendance ─────────────────────────────────────────────────
+class FaceRegisterRequest(BaseModel):
+    face_descriptor: list   # Array of 128 floats
+
+class FaceAttendanceRequest(BaseModel):
+    face_descriptor: list   # Array of 128 floats to match
+
+class StaffAttendanceOut(BaseModel):
+    id: int
+    role: str
+    user_id: int
+    date: str
+    check_in_time: Optional[str] = None
+    status: str
+    verified_by: str
+    created_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+

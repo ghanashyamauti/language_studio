@@ -1501,9 +1501,11 @@ def admin_reports(
     
     # Filter by Department if provided
     if dept_id:
-        # Get all class names for this department
-        class_names = [r[0] for r in db.query(HodClass.class_name).filter(HodClass.dept_id == dept_id).all()]
-        # If no classes found for this dept, we must filter for something that returns nothing
+        # 1. Primary dept_id on HodClass
+        primary = [r[0] for r in db.query(HodClass.class_name).filter(HodClass.dept_id == dept_id).all()]
+        # 2. Multi-dept membership via ClassDepartment junction table
+        secondary = [r[0] for r in db.query(ClassDepartment.class_name).filter(ClassDepartment.dept_id == dept_id).all()]
+        class_names = list(set(primary + secondary))
         if not class_names:
             q = q.filter(Student.student_id == -1)
         else:
@@ -2223,4 +2225,244 @@ async def import_students_from_file(
     return {"added": added, "updated": updated, "errors": errors}
 
 
+# ── Staff Attendance Correction Endpoints (Admin) ─────────────────────────────
+from pydantic import BaseModel
 
+class StaffAttendanceMarkRequest(BaseModel):
+    role: str       # "teacher" or "hod"
+    user_id: int
+    date: str       # YYYY-MM-DD
+    status: str     # "Present" or "Absent"
+
+@router.get("/staff-attendance")
+def get_staff_attendance(
+    date: str = Query(...),
+    user: dict = Depends(require_role("admin", "hod")),
+    db: Session = Depends(get_db),
+):
+    from app.models import Teacher, HOD, Department, StaffAttendance, StaffLeave, StaffFaceData
+    from datetime import datetime
+    
+    teachers = db.query(Teacher).all()
+    hods = db.query(HOD).all()
+    depts = {d.dept_id: d.name for d in db.query(Department).all()}
+    
+    attendance_records = db.query(StaffAttendance).filter(StaffAttendance.date == date).all()
+    att_map = {(r.role, r.user_id): r for r in attendance_records}
+    
+    approved_leaves = db.query(StaffLeave).filter(
+        StaffLeave.status == "approved",
+        StaffLeave.start_date <= date,
+        StaffLeave.end_date >= date,
+    ).all()
+    leave_map = {(l.applicant_role, l.applicant_id): l for l in approved_leaves}
+
+    all_faces = db.query(StaffFaceData).all()
+    face_map = {(f.role, f.user_id): True for f in all_faces}
+    
+    results = []
+    
+    # HODs
+    for h in hods:
+        key = ("hod", h.hod_id)
+        att = att_map.get(key)
+        leave = leave_map.get(key)
+        
+        status_val = "Absent"
+        check_in = None
+        verified = None
+        
+        if att:
+            status_val = att.status
+            check_in = att.check_in_time
+            verified = att.verified_by
+        elif leave:
+            status_val = "On Leave"
+            verified = "approved_leave"
+            
+        results.append({
+            "user_id": h.hod_id,
+            "name": h.name,
+            "role": "hod",
+            "department": depts.get(h.dept_id, "N/A"),
+            "status": status_val,
+            "check_in_time": check_in,
+            "verified_by": verified,
+            "face_registered": face_map.get(("hod", h.hod_id), False),
+        })
+        
+    # Teachers
+    for t in teachers:
+        key = ("teacher", t.teacher_id)
+        att = att_map.get(key)
+        leave = leave_map.get(key)
+        
+        status_val = "Absent"
+        check_in = None
+        verified = None
+        
+        if att:
+            status_val = att.status
+            check_in = att.check_in_time
+            verified = att.verified_by
+        elif leave:
+            status_val = "On Leave"
+            verified = "approved_leave"
+            
+        results.append({
+            "user_id": t.teacher_id,
+            "name": t.name,
+            "role": "teacher",
+            "department": depts.get(t.dept_id, "N/A"),
+            "status": status_val,
+            "check_in_time": check_in,
+            "verified_by": verified,
+            "face_registered": face_map.get(("teacher", t.teacher_id), False),
+        })
+        
+    return {"records": results, "date": date}
+
+@router.post("/staff-attendance/mark")
+def mark_staff_attendance(
+    payload: StaffAttendanceMarkRequest,
+    request: Request,
+    user: dict = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    from app.models import StaffAttendance
+    from datetime import datetime
+    
+    if payload.role not in ("teacher", "hod"):
+        raise HTTPException(400, "Role must be 'teacher' or 'hod'")
+    if payload.status not in ("Present", "Absent"):
+        raise HTTPException(400, "Status must be 'Present' or 'Absent'")
+        
+    existing = db.query(StaffAttendance).filter(
+        StaffAttendance.role == payload.role,
+        StaffAttendance.user_id == payload.user_id,
+        StaffAttendance.date == payload.date,
+    ).first()
+    
+    if payload.status == "Present":
+        now_time = datetime.now().strftime("%I:%M %p")
+        if existing:
+            existing.status = "Present"
+            existing.verified_by = "admin_override"
+            existing.check_in_time = now_time
+        else:
+            db.add(StaffAttendance(
+                role=payload.role,
+                user_id=payload.user_id,
+                date=payload.date,
+                check_in_time=now_time,
+                status="Present",
+                verified_by="admin_override"
+            ))
+    else:  # Absent
+        if existing:
+            db.delete(existing)
+            
+    db.commit()
+    activity.log(db, "admin", int(user["sub"]), user["name"], "STAFF_ATTENDANCE_CORRECTION",
+                 target=f"{payload.role}#{payload.user_id} on {payload.date}",
+                 detail={"status": payload.status}, ip=request.client.host)
+    return {"message": f"Successfully updated attendance status to {payload.status}"}
+
+
+@router.delete("/staff-face/{role}/{user_id}")
+def delete_staff_face_data(
+    role: str,
+    user_id: int,
+    request: Request,
+    user: dict = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    from app.models import StaffFaceData
+    if role not in ("teacher", "hod"):
+        raise HTTPException(400, "Role must be 'teacher' or 'hod'")
+        
+    face_record = db.query(StaffFaceData).filter(
+        StaffFaceData.role == role,
+        StaffFaceData.user_id == user_id,
+    ).first()
+    
+    if not face_record:
+        raise HTTPException(404, "Face registration not found for this staff member")
+        
+    db.delete(face_record)
+    db.commit()
+    
+    activity.log(db, "admin", int(user["sub"]), user["name"], "STAFF_FACE_DELETION",
+                 target=f"{role}#{user_id}", ip=request.client.host)
+    return {"message": "Successfully removed registered face data"}
+
+
+# ── Teacher Daily Lectures (admin + hod) ──────────────────────────────────────
+@router.get("/teacher-daily-lectures")
+def teacher_daily_lectures(
+    date: str = Query(...),
+    user: dict = Depends(require_role("admin", "hod")),
+    db: Session = Depends(get_db),
+):
+    """Per-teacher lecture slots for a given date.
+    Admin sees all teachers; HOD sees only teachers in their assigned classes."""
+    from collections import defaultdict
+
+    role = user.get("role", "admin")
+
+    # Distinct (teacher, class, subject) slots for the date
+    q = db.query(
+        Attendance.teacher_id,
+        Attendance.class_,
+        Attendance.subject,
+        func.min(Attendance.time).label("earliest_time")
+    ).filter(
+        Attendance.date == date,
+        Attendance.teacher_id.isnot(None)
+    ).group_by(
+        Attendance.teacher_id,
+        Attendance.class_,
+        Attendance.subject,
+    )
+
+    if role == "hod":
+        hod_id = int(user["sub"])
+        class_names = [hc.class_name for hc in db.query(HodClass).filter(HodClass.hod_id == hod_id).all()]
+        if not class_names:
+            return {"data": [], "date": date}
+        q = q.filter(Attendance.class_.in_(class_names))
+
+    rows = q.all()
+
+    # Group slots by teacher
+    teacher_slots_map = defaultdict(list)
+    for row in rows:
+        teacher_slots_map[row.teacher_id].append({
+            "class_": row.class_,
+            "subject": row.subject,
+            "time": row.earliest_time,
+        })
+
+    if not teacher_slots_map:
+        return {"data": [], "date": date}
+
+    teacher_ids = list(teacher_slots_map.keys())
+    teachers = {t.teacher_id: t for t in db.query(Teacher).filter(Teacher.teacher_id.in_(teacher_ids)).all()}
+    depts = {d.dept_id: d.name for d in db.query(Department).all()}
+
+    result = []
+    for tid, slots_list in teacher_slots_map.items():
+        t = teachers.get(tid)
+        if not t:
+            continue
+        result.append({
+            "teacher_id": tid,
+            "name": t.name,
+            "phone": t.phone or "",
+            "department": depts.get(t.dept_id, "N/A"),
+            "lecture_count": len(slots_list),
+            "slots": sorted(slots_list, key=lambda x: x.get("time") or ""),
+        })
+
+    result.sort(key=lambda x: x["lecture_count"], reverse=True)
+    return {"data": result, "date": date}

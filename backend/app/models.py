@@ -227,3 +227,55 @@ class CollegeSettings(Base):
     attendance_threshold = Column(Integer, nullable=False, default=75)  # %
     academic_year = Column(String, nullable=True)        # e.g. "2024-25"
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class StaffLeave(Base):
+    """Leave applications for both teachers and HODs."""
+    __tablename__ = "staff_leaves"
+    leave_id = Column(Integer, primary_key=True, autoincrement=True)
+    applicant_role = Column(String, nullable=False)   # "teacher" or "hod"
+    applicant_id = Column(Integer, nullable=False)     # teacher_id or hod_id
+    leave_type = Column(String, nullable=False)        # Casual Leave, Sick Leave, Personal Leave, Other
+    start_date = Column(String, nullable=False)        # YYYY-MM-DD
+    end_date = Column(String, nullable=False)          # YYYY-MM-DD
+    reason = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending, approved, rejected
+    reviewed_by_role = Column(String, nullable=True)   # hod or admin
+    reviewed_by_id = Column(Integer, nullable=True)
+    reviewed_by_name = Column(String, nullable=True)
+    review_comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','approved','rejected')", name="chk_leave_status"),
+        CheckConstraint("applicant_role IN ('teacher','hod')", name="chk_leave_role"),
+    )
+
+
+class StaffFaceData(Base):
+    """Stored face descriptors for face-detection attendance."""
+    __tablename__ = "staff_face_data"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    role = Column(String, nullable=False)              # "teacher" or "hod"
+    user_id = Column(Integer, nullable=False)           # teacher_id or hod_id
+    face_descriptor = Column(Text, nullable=False)      # JSON array of 128 floats
+    registered_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        UniqueConstraint("role", "user_id", name="uq_staff_face"),
+    )
+
+
+class StaffAttendance(Base):
+    """Daily attendance records for teachers and HODs (via face detection)."""
+    __tablename__ = "staff_attendance"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    role = Column(String, nullable=False)              # "teacher" or "hod"
+    user_id = Column(Integer, nullable=False)           # teacher_id or hod_id
+    date = Column(String, nullable=False)               # YYYY-MM-DD
+    check_in_time = Column(String, nullable=True)       # HH:MM:SS
+    status = Column(String, nullable=False, default="Present")
+    verified_by = Column(String, default="face_detection")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        UniqueConstraint("role", "user_id", "date", name="uq_staff_attendance"),
+    )
