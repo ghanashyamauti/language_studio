@@ -14,18 +14,16 @@ def is_s3_configured() -> bool:
 def upload_file_to_s3(file: UploadFile, filename: str, content_type: str = None) -> str:
     """
     Uploads a file to AWS S3 bucket.
-    If S3 configuration is missing, it falls back to local disk storage.
-    Returns the public URL (or local path /uploads/filename) of the uploaded file.
+    If S3 configuration is missing, it falls back to base64 Data URL database storage.
+    Returns the public S3 URL or base64 Data URL of the uploaded file.
     """
     if not is_s3_configured():
-        # Local fallback
-        os.makedirs("uploads", exist_ok=True)
-        filepath = os.path.join("uploads", filename)
+        import base64
         file.file.seek(0)
         content = file.file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
-        return f"/uploads/{filename}"
+        encoded = base64.b64encode(content).decode("utf-8")
+        mime = content_type or file.content_type or "image/jpeg"
+        return f"data:{mime};base64,{encoded}"
 
     # S3 Upload
     s3_client = boto3.client(
@@ -64,12 +62,12 @@ def upload_file_to_s3(file: UploadFile, filename: str, content_type: str = None)
                 raise ce
         return f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/{filename}"
     except Exception as e:
-        # Fallback to local storage on any other S3 error
-        print(f"[S3 ERROR] Failed to upload to S3: {e}. Falling back to local storage.")
-        os.makedirs("uploads", exist_ok=True)
-        filepath = os.path.join("uploads", filename)
+        # Fallback to base64 database storage on any other S3 error
+        print(f"[S3 ERROR] Failed to upload to S3: {e}. Falling back to base64 storage.")
+        import base64
         file.file.seek(0)
         content = file.file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
-        return f"/uploads/{filename}"
+        encoded = base64.b64encode(content).decode("utf-8")
+        mime = content_type or file.content_type or "image/jpeg"
+        return f"data:{mime};base64,{encoded}"
+
